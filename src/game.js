@@ -1,6 +1,7 @@
 import { Group, Quaternion, Vector3 } from 'three';
 import { ENEMY, FLIGHT, PLAYER, WORLD } from './config.js';
-import { PlayerBody } from './physics/player.js';
+import { PlayerBody, SMASH_ENTER, SMASH_EXIT, SMASH_GROUND } from './physics/player.js';
+import { Decals } from './fx/decals.js';
 import { cullChunks } from './world/city.js';
 import { U } from './world/shared.js';
 import { SpriteBatch } from './fx/sprites.js';
@@ -19,6 +20,8 @@ const _v2 = new Vector3();
 const _q = new Quaternion();
 const _look = new Vector3();
 const _thrustLook = new Vector3(0, 0, -1);
+const _handThrust = new Vector3();
+const _vdir = new Vector3();
 const _right = new Vector3();
 const _fwd = new Vector3();
 const _headW = new Vector3();
@@ -82,16 +85,22 @@ export class Game {
     this.snapPulse = 0;
     this.audioTimer = 0;
     this.stepInput = {
-      grip: 0, boost: false, look: _thrustLook, stickX: 0, stickY: 0, right: _right, fwd: _fwd,
+      grip: 0, boost: false, handMode: false, handThrust: _handThrust, look: _thrustLook, stickX: 0, stickY: 0, right: _right, fwd: _fwd,
     };
-    this.options = { vignette: true, bank: FLIGHT.bankEnabled, debug: false };
+    this.options = { vignette: true, bank: FLIGHT.bankEnabled, debug: false, flightMode: FLIGHT.flightMode };
+    // Hand repulsor thrusters: world thrust direction (away from the palm) + palm position.
+    this.handDir = [new Vector3(), new Vector3()];
+    this.handPos = [new Vector3(), new Vector3()];
+    this.handOk = [false, false];
+    this.handGrip = [0, 0];
 
     // Systems
     this.sprites = new SpriteBatch(640);
     scene.add(this.sprites.mesh);
-    this.overlaySprites = new SpriteBatch(128, { depthTest: false, renderOrder: 999 });
+    this.overlaySprites = new SpriteBatch(200, { depthTest: false, renderOrder: 999 });
     scene.add(this.overlaySprites.mesh);
     this.particles = new Particles(scene);
+    this.decals = new Decals(scene);
     const cap = ENEMY.maxActive;
     const debrisCap = 110;
     this.goonRenderer = new GoonRenderer(scene, goonAssets.atlas, goonAssets.parts, {
@@ -129,6 +138,7 @@ export class Game {
     this.bats.clear();
     this.debris.clear();
     this.weapons.clear();
+    this.decals.clear();
     this.waves.reset();
     this.hp = PLAYER.maxHp;
     this.score = 0;
@@ -137,7 +147,9 @@ export class Game {
     this.hud.fade = 0;
     this.hud.setMenu(false);
     this.respawn();
-    this.hud.showMessage('REPULSOR', 'Squeeze LEFT GRIP to fly · triggers to fire', 4);
+    this.hud.showMessage('REPULSOR', this.renderer.xr.isPresenting && this.options.flightMode === 'hands'
+      ? 'Grips fire palm thrusters · palms DOWN to lift · look where you fly'
+      : 'Squeeze LEFT GRIP to fly · triggers to fire', 5);
   }
 
   respawn() {
@@ -263,6 +275,7 @@ export class Game {
     this.updateHead();
     this.attachGauntlets();
     this.weapons.updateAim();
+    this.updateHandThrusters();
 
     // Room-scale steps move the capsule with the head. When entering / leaving
     // VR the offset jumps, so re-baseline instead of moving the body.
@@ -322,10 +335,11 @@ export class Game {
       const o = this.options;
       switch (hud.menuIndex) {
         case 0: this.state = 'playing'; hud.setMenu(false); break;
-        case 1: o.vignette = !o.vignette; break;
-        case 2: o.bank = !o.bank; break;
-        case 3: o.debug = !o.debug; break;
-        case 4: this.restart(); break;
+        case 1: o.flightMode = o.flightMode === 'hands' ? 'gaze' : 'hands'; break;
+        case 2: o.vignette = !o.vignette; break;
+        case 3: o.bank = !o.bank; break;
+        case 4: o.debug = !o.debug; break;
+        case 5: this.restart(); break;
         default: break;
       }
       if (this.state === 'paused') hud.drawMenu();
@@ -337,7 +351,9 @@ export class Game {
     const si = this.stepInput;
     const alive = this.state === 'playing';
     // Boost meter.
-    const wantBoost = alive && input.boost && this.boostMeter > 0.02 && input.grip > 0.05;
+    const handMode = input.xr && this.options.flightMode === 'hands';
+    const anyGrip = handMode ? Math.max(input.gripL, input.gripR) : input.grip;
+    const wantBoost = alive && input.boost && this.boostMeter > 0.02 && anyGrip > 0.05;
     if (wantBoost) {
       this.boostMeter = Math.max(0, this.boostMeter - FLIGHT.boostDrainPerSec * dt);
       this.boostIdle = 0;
@@ -355,11 +371,34 @@ export class Game {
     _thrustLook.z += (_look.z - _thrustLook.z) * lk;
     _thrustLook.normalize();
     si.grip = this.gripSmooth;
+    si.handMode = handMode;
+    _handThrust.set(0, 0, 0);
+    if (handMode) {
+      // Each grip fires that hand's repulsor, pushing you away from the palm.
+      const kg = Math.min(1, dt * FLIGHT.gripSmoothing);
+      let gmax = 0;
+      for (let h = 0; h < 2; h++) {
+        const raw = alive && this.handOk[h] ? (h === 0 ? input.gripL : input.gripR) : 0;
+        const gr = raw > FLIGHT.gripDeadzone ? raw : 0;
+        this.handGrip[h] += (gr - this.handGrip[h]) * kg;
+        _handThrust.addScaledVector(this.handDir[h], this.handGrip[h] * FLIGHT.handThrustMax);
+        if (this.handGrip[h] > gmax) gmax = this.handGrip[h];
+      }
+      if (wantBoost) _handThrust.multiplyScalar(FLIGHT.boostMult);
+      si.grip = gmax;
+    } else {
+      this.handGrip[0] = this.handGrip[1] = 0;
+    }
     si.boost = wantBoost;
     si.stickX = alive ? input.stickX : 0;
     si.stickY = alive ? input.stickY : 0;
     this.prevVel.copy(this.body.vel);
+    this.body.eventCount = 0;
     this.body.step(dt, si);
+    for (let k = 0; k < this.body.eventCount; k++) {
+      const e = this.body.events, o = k * 8;
+      this.onSmash(e[o], e[o + 1], e[o + 2], e[o + 3], e[o + 4], e[o + 5], e[o + 6], e[o + 7]);
+    }
     const lat = ((this.body.vel.x - this.prevVel.x) * _right.x + (this.body.vel.z - this.prevVel.z) * _right.z) / dt;
     this.latAcc += (lat - this.latAcc) * Math.min(1, dt * 4);
     if (this.body.lastImpact > FLIGHT.impactHapticSpeed) {
@@ -408,6 +447,112 @@ export class Game {
     this.bank.position.set(h.x - _v2.x, h.y - _v2.y, h.z - _v2.z);
   }
 
+  // World pose of each hand's repulsor: thrust points away from the palm.
+  // Grip space +X is the back of the right hand / the palm side of the left.
+  updateHandThrusters() {
+    const input = this.input;
+    for (let h = 0; h < 2; h++) {
+      const grip = input.xr ? input.gripObject(h === 0 ? 'left' : 'right') : null;
+      this.handOk[h] = !!grip;
+      if (!grip) continue;
+      const e = grip.matrixWorld.elements;
+      const s = (h === 0 ? -1 : 1) * FLIGHT.palmSign;
+      this.handDir[h].set(e[0] * s, e[1] * s, e[2] * s).normalize();
+      this.handPos[h].set(e[12], e[13], e[14]);
+    }
+  }
+
+  // Omni-Man impacts: punching into / out of a building, or cratering the ground.
+  onSmash(type, x, y, z, nx, ny, nz, speed) {
+    const p = this.particles;
+    const k = Math.min(1, speed / 60);
+    if (type === SMASH_GROUND) {
+      this.shockwave(x, y + 0.2, z, FLIGHT.craterRadius * (0.6 + 0.4 * k));
+      p.concreteBurst(x, y + 0.3, z, 0, 1, 0, 40, 14 * (0.6 + k));
+      this.decals.add(this.time, x, y + 0.02, z, 0, 1, 0, 7 + 5 * k);
+      // Superhero landing hurts anything nearby.
+      const list = this.enemies.list;
+      for (let i = 0; i < list.length; i++) {
+        const e = list[i];
+        if (!e.active) continue;
+        const dx = e.pos.x - x, dz = e.pos.z - z, dy = e.pos.y - y;
+        const d = Math.hypot(dx, dz);
+        if (d < FLIGHT.craterRadius && Math.abs(dy) < 6) {
+          const f = 1 - d / FLIGHT.craterRadius;
+          if (this.enemies.damage(e, Math.ceil(3 * f + 0.5), dx / (d || 1), 0.8, dz / (d || 1), false)) this.hitMarker(false, true);
+        }
+      }
+      this.input.haptic('both', 1, 250);
+      this.snapPulse = 0.5;
+      return;
+    }
+    // Building wall: debris sprays out of the face (entry: back toward us, exit: onward).
+    p.concreteBurst(x, y, z, nx, ny, nz, type === SMASH_ENTER ? 45 : 35, 10 + 12 * k);
+    p.sparkBurst(x, y, z, 14, 10, 1.0, 0.6, 0.3, 0.5, 0.5);
+    this.decals.add(this.time, x, y, z, nx, ny, nz, 5 + 3 * k);
+    this.flashAt(x, y, z, 3, 0.18);
+    this.audio.play('boom', x, y, z, 0.7 + 0.3 * k);
+    this.audio.play('crack', x, y, z, 1);
+    this.input.haptic('both', 1, 140);
+    this.snapPulse = Math.max(this.snapPulse, 0.3);
+    if (type === SMASH_ENTER) this.addScore(25);
+  }
+
+  // Head-locked crosshair + flight-path marker (where you are actually going).
+  renderFlightHud() {
+    const ov = this.overlaySprites;
+    const h = _headW, L = _look;
+    const D = 4;
+    const cx = h.x + L.x * D, cy = h.y + L.y * D, cz = h.z + L.z * D;
+    // crosshair: centre dot + 4 ticks with a gap
+    _v.set(0, 1, 0).applyQuaternion(this.camera.getWorldQuaternion(_q));
+    _v2.crossVectors(L, _v).normalize();
+    const gap = 0.07, len = 0.1, w = 0.011;
+    ov.pushPoint(cx, cy, cz, 0.022, 0.8, 0.95, 1.0, 0.9, 0.6);
+    for (let i = 0; i < 4; i++) {
+      const ax = i < 2 ? _v2 : _v;
+      const sgn = i % 2 === 0 ? 1 : -1;
+      ov.push(cx + ax.x * gap * sgn, cy + ax.y * gap * sgn, cz + ax.z * gap * sgn,
+        cx + ax.x * (gap + len) * sgn, cy + ax.y * (gap + len) * sgn, cz + ax.z * (gap + len) * sgn, w, 0.7, 0.9, 1.0, 0.8, 0.6);
+    }
+    // flight-path marker: circle with wings along the velocity direction
+    const v = this.body.vel;
+    const sp = v.length();
+    if (sp < 3 || this.body.grounded) return;
+    _vdir.copy(v).multiplyScalar(1 / sp);
+    if (_vdir.dot(L) < 0.2) return; // moving backward / sideways out of view
+    const px = h.x + _vdir.x * D, py = h.y + _vdir.y * D, pz = h.z + _vdir.z * D;
+    const r = 0.1;
+    const cr = 0.15, cg = 1.0, cb = 0.35, al = Math.min(1, sp / 15);
+    for (let i = 0; i < 10; i++) {
+      const a0 = (i / 10) * Math.PI * 2, a1 = ((i + 1) / 10) * Math.PI * 2;
+      const c0 = Math.cos(a0) * r, s0 = Math.sin(a0) * r, c1 = Math.cos(a1) * r, s1 = Math.sin(a1) * r;
+      ov.push(px + _v2.x * c0 + _v.x * s0, py + _v2.y * c0 + _v.y * s0, pz + _v2.z * c0 + _v.z * s0,
+        px + _v2.x * c1 + _v.x * s1, py + _v2.y * c1 + _v.y * s1, pz + _v2.z * c1 + _v.z * s1, 0.011, cr, cg, cb, al, 0.25);
+    }
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      ov.push(px + _v2.x * r * sgn, py + _v2.y * r * sgn, pz + _v2.z * r * sgn,
+        px + _v2.x * r * 2.4 * sgn, py + _v2.y * r * 2.4 * sgn, pz + _v2.z * r * 2.4 * sgn, 0.011, cr, cg, cb, al, 0.25);
+    }
+    ov.push(px + _v.x * r, py + _v.y * r, pz + _v.z * r, px + _v.x * r * 2, py + _v.y * r * 2, pz + _v.z * r * 2, 0.011, cr, cg, cb, al, 0.25);
+  }
+
+  // Repulsor exhaust out of each palm while its grip is squeezed.
+  renderThrusters() {
+    const sp = this.sprites;
+    for (let h = 0; h < 2; h++) {
+      const g = this.handGrip[h];
+      if (!this.handOk[h] || g < 0.03) continue;
+      const p = this.handPos[h], d = this.handDir[h];
+      const boost = this.stepInput.boost ? 1.6 : 1;
+      const L = (0.25 + 0.9 * g) * boost * (0.85 + 0.15 * Math.sin(this.time * 80 + h));
+      // exhaust leaves opposite to the thrust direction
+      sp.push(p.x - d.x * 0.04, p.y - d.y * 0.04, p.z - d.z * 0.04, p.x - d.x * L, p.y - d.y * L, p.z - d.z * L,
+        0.05 + 0.07 * g, 0.35, 0.7, 1.0, 0.9, 0.55);
+      sp.pushPoint(p.x - d.x * 0.05, p.y - d.y * 0.05, p.z - d.z * 0.05, 0.08 + 0.1 * g, 0.5, 0.8, 1.0, 1, 0.6);
+    }
+  }
+
   // Enemy markers (drawn through walls): a glowing tag above goons in view,
   // and a pip at the edge of vision pointing toward goons outside it.
   renderMarkers() {
@@ -453,6 +598,8 @@ export class Game {
     gr.end();
     this.weapons.render(dt, alpha);
     this.renderMarkers();
+    if (this.state === 'playing') this.renderFlightHud();
+    this.renderThrusters();
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       if (f.life <= 0) continue;
@@ -487,7 +634,8 @@ export class Game {
     this.audioTimer -= dt;
     if (this.audioTimer <= 0) {
       this.audioTimer = 1 / 15;
-      const grip = this.state === 'playing' ? this.input.grip : 0;
+      const hm = this.stepInput.handMode;
+      const grip = this.state !== 'playing' ? 0 : hm ? Math.max(this.handGrip[0], this.handGrip[1]) : this.input.grip;
       this.audio.update(_headW, _look, _up, speed, grip, this.stepInput.boost);
     }
   }

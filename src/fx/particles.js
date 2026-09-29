@@ -157,6 +157,8 @@ export class Particles {
   constructor(scene) {
     const box = new BoxGeometry(0.05, 0.05, 0.3);
     this.splinters = new GpuParticles(box, 600, SPLINTER_VS, SPLINTER_FS, {});
+    // Concrete / glass chunks from smashing through buildings.
+    this.chunks = new GpuParticles(new BoxGeometry(0.32, 0.22, 0.28), 360, SPLINTER_VS, SPLINTER_FS, {});
     const quad = new InstancedBufferGeometry();
     quad.setAttribute('position', new BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
     quad.setIndex([0, 1, 2, 0, 2, 3]);
@@ -165,6 +167,7 @@ export class Particles {
     });
     this.sparks.mesh.renderOrder = 11;
     scene.add(this.splinters.mesh);
+    scene.add(this.chunks.mesh);
     scene.add(this.sparks.mesh);
     this.time = 0;
     this._seed = 1;
@@ -192,6 +195,26 @@ export class Particles {
     }
   }
 
+  // Concrete chunks + glass glints + dust, sprayed along normal n.
+  concreteBurst(x, y, z, nx, ny, nz, count, speed) {
+    for (let i = 0; i < count; i++) {
+      const s = speed * (0.3 + this.rand() * 0.7);
+      const vx = nx * s + (this.rand() - 0.5) * speed * 0.8;
+      const vy = ny * s + (this.rand() - 0.2) * speed * 0.6;
+      const vz = nz * s + (this.rand() - 0.5) * speed * 0.8;
+      const g = 0.45 + this.rand() * 0.35;
+      const glass = this.rand() < 0.2;
+      this.chunks.spawn(this.time, x + (this.rand() - 0.5) * 2, y + (this.rand() - 0.5) * 2, z + (this.rand() - 0.5) * 2,
+        vx, vy, vz, -0.3, glass ? 0.4 : g, glass ? 0.55 : g * 0.97, glass ? 0.65 : g * 0.92, 2.2 + this.rand() * 1.5);
+    }
+    // dust puff (dim additive so it reads as a haze, not a glow)
+    for (let i = 0; i < count; i++) {
+      const ux = nx + (this.rand() - 0.5) * 1.6, uy = ny + (this.rand() - 0.3), uz = nz + (this.rand() - 0.5) * 1.6;
+      const s = speed * 0.5 * (0.3 + this.rand());
+      this.sparks.spawn(this.time, x, y, z, ux * s, uy * s, uz * s, 0.05, 0.22, 0.2, 0.18, 1.5 + this.rand() * 1.5);
+    }
+  }
+
   sparkBurst(x, y, z, count, speed, r, g, b, life, gravity = 0.3) {
     for (let i = 0; i < count; i++) {
       const ux = this.rand() - 0.5, uy = this.rand() - 0.5, uz = this.rand() - 0.5;
@@ -207,10 +230,11 @@ export class Particles {
   frame(time) {
     this.time = time;
     this.splinters.update(time);
+    this.chunks.update(time);
     this.sparks.update(time);
   }
 
   aliveCount() {
-    return this.splinters.alive(this.time) + this.sparks.alive(this.time);
+    return this.splinters.alive(this.time) + this.chunks.alive(this.time) + this.sparks.alive(this.time);
   }
 }

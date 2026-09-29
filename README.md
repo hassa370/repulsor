@@ -39,7 +39,7 @@ All bindings live in one object, `BINDINGS` in `src/config.js`.
 
 | Action | Quest 3 Touch Plus | Desktop |
 |---|---|---|
-| Main thrust (analog) | **Left grip**: a light squeeze hovers, a full squeeze gives full power | `Space` = full, `Q` = hover level |
+| Palm thrusters (analog) | **Left / right grip** fires that hand's repulsor. It pushes you away from the palm: palms down = lift, palms back = forward, one hand = boost in that direction | `Space` = full, `Q` = hover level |
 | Steer / strafe | **Left thumbstick** | `W A S D` |
 | Snap turn 30° | **Right thumbstick** left/right | `Z` / `C` (mouse = free look) |
 | Fire left / right repulsor | **Left / right trigger**: tap = quick shot, hold = charged shot (fires on release) | Right / left mouse button (hold to charge) |
@@ -49,13 +49,20 @@ All bindings live in one object, `BINDINGS` in `src/config.js`.
 | Pause menu (debug overlay lives here) | **Y** | `Tab` / `P` |
 | Menu navigate / choose | Right stick up/down, **A** or right trigger | Arrow keys, `Enter` / click |
 
-Thrust direction follows the head, but smoothed, so glancing around doesn't yank your flight path. The grip has three zones:
+**Flight (VR, default "HANDS" mode).** Each grip is a repulsor in that hand, and the force always points away from your palm:
 
-- **0–20 %**: gentle descent.
-- **20–45 %**: hover. A wide range of finger pressure holds you steady, and with the stick centred an air brake stops your drift so you can aim.
-- **45–100 %**: more power, and the thrust tilts toward where you look. Look down to dive, look up to climb.
+- **Hover:** hold your arms down with palms facing the floor and squeeze both grips about a quarter of the way. Squeeze harder to climb.
+- **Go forward:** turn your palms backward.
+- **Boost in one direction:** squeeze just one hand.
+- **Steer with your eyes:** while thrusting, your flight path bends toward where you look.
 
-The left stick adds lateral and forward/back thrust.
+A **crosshair** in the centre of your view shows where you're looking. A green **flight-path marker** (a circle with wings) shows where you're actually moving. The pause menu switches to **GAZE** mode (left grip thrusts toward where you look), which is also what desktop uses.
+
+**Smash through buildings (Omni-Man style).** Hit a wall faster than `FLIGHT.smashSpeed` (24 m/s) and you punch straight through:
+
+- concrete chunks and dust fly out, and a hole with a molten edge stays on each face, in and out;
+- you keep `smashKeep` (80 %) of your speed per wall;
+- slam into the ground or a roof faster than `craterSpeed` (22 m/s) for a crater, a shockwave, and damage to every goon within `craterRadius`.
 
 **Finding and hitting goons**
 - Every goon has a glowing marker above it, drawn through walls.
@@ -73,6 +80,8 @@ Every constant is in `src/config.js` under `FLIGHT`. The most useful ones:
 | `hoverLo`, `hoverHi` | The grip range that holds a steady hover (default 0.2–0.45). |
 | `gripSmoothing`, `gripDeadzone`, `lookSmoothing` | Input smoothing. Lower `lookSmoothing` makes the thrust direction calmer when you look around. |
 | `airBrake` | How quickly horizontal drift stops while hovering with the stick centred. |
+| `flightMode`, `handThrustMax`, `palmSign`, `gazeSteer` | Palm-thruster flight: thrust per hand, which side of the hand fires (set `palmSign: -1` if it's backwards on your controllers), and how strongly the path follows your gaze. |
+| `smashSpeed`, `smashKeep`, `craterSpeed`, `craterRadius` | Smashing through buildings and superhero landings. |
 | `thrustForwardGain`, `thrustUpBias` | How quickly the thrust vector tilts from "up" toward "look direction" as grip increases. |
 | `dragQuadratic`, `dragLinear` | Natural top speed. The defaults give ≈ 60 m/s at full thrust and ≈ 100 m/s when boosting. |
 | `hoverAssist`, `hoverWindow` | How strongly vertical speed is damped when thrust roughly cancels gravity. |

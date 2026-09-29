@@ -46,6 +46,17 @@ export const FLIGHT = {
   gripSmoothing: 7, // 1/s low-pass on grip input (higher = snappier)
   lookSmoothing: 2.5, // 1/s: how fast thrust direction follows the head (lower = calmer)
   airBrake: 1.2, // 1/s horizontal damping while hovering with the stick centred
+  // Hand-thruster mode (VR default): each grip fires that hand's repulsor, which
+  // pushes you AWAY from the palm (palms down = lift, palms back = forward).
+  flightMode: 'hands', // 'hands' | 'gaze' (gaze = left grip thrusts toward where you look)
+  handThrustMax: 18, // m/s^2 per hand at full grip (both hands ~3.7 g)
+  palmSign: 1, // flip to -1 if thrust comes out of the back of your hands
+  gazeSteer: 1.4, // 1/s: how strongly your flight path bends toward where you look
+  // Omni-Man mode: hit a building faster than this and you smash through it.
+  smashSpeed: 24, // m/s into the wall
+  smashKeep: 0.8, // fraction of speed kept per wall
+  craterSpeed: 22, // m/s downward into the ground -> crater + shockwave
+  craterRadius: 16, // m, enemies inside get hit
   strafeAccel: 7, // left stick lateral / forward accel (m/s^2)
   boostMult: 2.5,
   boostDrainPerSec: 0.35, // meter units (0..1) per second

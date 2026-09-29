@@ -15,7 +15,6 @@ const overlay = document.getElementById('overlay');
 const vrBtn = document.getElementById('enter-vr');
 const deskBtn = document.getElementById('play-desktop');
 const status = document.getElementById('status');
-const crosshair = document.getElementById('crosshair');
 
 const renderer = new WebGLRenderer({ antialias: RENDER.antialias, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
@@ -131,7 +130,6 @@ deskBtn.addEventListener('click', () => {
   game.audio.start();
   game.input.wantPointerLock = true;
   renderer.domElement.requestPointerLock();
-  crosshair.style.display = 'block';
   start();
 });
 

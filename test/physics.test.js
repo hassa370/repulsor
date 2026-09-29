@@ -103,18 +103,18 @@ test('lands on a roof', () => {
   assert.ok(Math.abs(p.pos.y - 50) < 0.05, `y=${p.pos.y}`);
 });
 
-test('flying into a wall pushes out and reflects', () => {
+test('flying into a wall slowly pushes out and reflects', () => {
   const p = new PlayerBody(world());
   p.reset(0, 20, 0);
-  p.vel.set(40, 0, 0);
+  p.vel.set(23, 0, 0); // just under FLIGHT.smashSpeed
   let impact = 0;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 60; i++) {
     p.step(1 / 90, input(0.33));
     impact = Math.max(impact, p.lastImpact);
   }
   assert.ok(p.pos.x <= 10 - FLIGHT.capsuleRadius + 1e-3, `x=${p.pos.x}`);
   assert.ok(p.vel.x <= 0, 'velocity reflected');
-  assert.ok(impact > 20);
+  assert.ok(impact > 5);
 });
 
 test('raycast hits building face and ground', () => {
@@ -132,4 +132,32 @@ test('pointInside', () => {
   const w = world();
   assert.ok(w.pointInside(20, 10, 0) >= 0);
   assert.equal(w.pointInside(0, 10, 0), -1);
+});
+
+test('fast impact smashes through the building and out the far side', () => {
+  const p = new PlayerBody(world());
+  p.reset(0, 20, 0);
+  p.vel.set(60, 0, 0);
+  const types = [];
+  for (let i = 0; i < 90; i++) {
+    p.eventCount = 0;
+    p.step(1 / 90, input(0.6));
+    for (let k = 0; k < p.eventCount; k++) types.push(p.events[k * 8]);
+  }
+  assert.ok(p.pos.x > 30, `x=${p.pos.x}`);
+  assert.deepEqual(types.slice(0, 2), [1, 2]);
+});
+
+test('hard ground landing produces a crater event', () => {
+  const p = new PlayerBody(world());
+  p.reset(-60, 40, 0);
+  p.vel.set(0, -35, 0);
+  let crater = false;
+  for (let i = 0; i < 180; i++) {
+    p.eventCount = 0;
+    p.step(1 / 90, input(0));
+    for (let k = 0; k < p.eventCount; k++) if (p.events[k * 8] === 3) crater = true;
+  }
+  assert.ok(crater);
+  assert.ok(p.grounded);
 });

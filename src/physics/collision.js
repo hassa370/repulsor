@@ -26,6 +26,20 @@ export class CollisionWorld {
     this.grounded = false;
     this.groundBox = -1;
     this.impactSpeed = 0;
+    // Boxes the player is currently smashing through (skipped by collideCapsule).
+    this.ignore = new Int32Array(4).fill(-1);
+  }
+
+  isIgnored(i) {
+    const g = this.ignore;
+    return g[0] === i || g[1] === i || g[2] === i || g[3] === i;
+  }
+
+  addIgnore(i) {
+    const g = this.ignore;
+    for (let k = 0; k < 4; k++) if (g[k] === i) return;
+    for (let k = 0; k < 4; k++) if (g[k] < 0) { g[k] = i; return; }
+    g[0] = g[1]; g[1] = g[2]; g[2] = g[3]; g[3] = i;
   }
 
   addBox(minx, miny, minz, maxx, maxy, maxz) {
@@ -119,6 +133,7 @@ export class CollisionWorld {
     for (let iter = 0; iter < 2; iter++) {
       for (let k = 0; k < n; k++) {
         const i = this.result[k];
+        if (this.isIgnored(i)) continue;
         const o = i * 6;
         const bminx = b[o], bminy = b[o + 1], bminz = b[o + 2];
         const bmaxx = b[o + 3], bmaxy = b[o + 4], bmaxz = b[o + 5];
@@ -210,7 +225,7 @@ export class CollisionWorld {
 
   // Ray vs boxes + ground; returns distance or maxDist if nothing hit.
   // Walks grid cells with a 2D DDA so long rays stay cheap.
-  raycast(ox, oy, oz, dx, dy, dz, maxDist) {
+  raycast(ox, oy, oz, dx, dy, dz, maxDist, skipIgnored = false) {
     let best = maxDist;
     this.hitBox = -1;
     // ground plane
@@ -241,6 +256,7 @@ export class CollisionWorld {
           const i = this.cellItems[k];
           if (this.stamp[i] === id) continue;
           this.stamp[i] = id;
+          if (skipIgnored && this.isIgnored(i)) continue;
           const o = i * 6;
           // slab test
           let tmin = 0, tmax = best, axis = -1, sign = 0;
@@ -275,6 +291,12 @@ export class CollisionWorld {
       else { tCell = tMaxZ; tMaxZ += tDeltaZ; cz += stepZ; }
     }
     return best;
+  }
+
+  // Is a point inside box i (with margin)?
+  insideBox(i, x, y, z, m = 0) {
+    const b = this.boxes, o = i * 6;
+    return x > b[o] - m && x < b[o + 3] + m && y > b[o + 1] - m && y < b[o + 4] + m && z > b[o + 2] - m && z < b[o + 5] + m;
   }
 
   // Top surface of a box (for AI roof logic).

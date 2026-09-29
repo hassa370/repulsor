@@ -11,6 +11,8 @@ export class Input {
     this.xr = false;
 
     this.grip = 0;
+    this.gripL = 0; // per-hand grips (hand-thruster flight)
+    this.gripR = 0;
     this.stickX = 0;
     this.stickY = 0;
     this.turnX = 0;
@@ -127,6 +129,8 @@ export class Input {
     if (this.xr) {
       const x = b.xr;
       this.grip = this._btn(x.thrust.hand, x.thrust.button);
+      this.gripL = this._btn('left', 1);
+      this.gripR = this._btn('right', 1);
       this.stickX = this._axis(x.steer.hand, x.steer.axes[0]);
       this.stickY = -this._axis(x.steer.hand, x.steer.axes[1]);
       this.turnX = this._axis(x.snapTurn.hand, x.snapTurn.axis);
@@ -142,6 +146,7 @@ export class Input {
       const d = b.desktop;
       const k = this.keys;
       this.grip = k.has(d.thrust) ? 1 : k.has(d.hover) ? 0.33 : 0;
+      this.gripL = this.gripR = this.grip;
       this.stickX = (k.has(d.right) ? 1 : 0) - (k.has(d.left) ? 1 : 0);
       this.stickY = (k.has(d.forward) ? 1 : 0) - (k.has(d.back) ? 1 : 0);
       this.turnX = (k.has(d.snapRight) ? 1 : 0) - (k.has(d.snapLeft) ? 1 : 0);

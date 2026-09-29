@@ -43,7 +43,7 @@ void main() {
 }
 `;
 
-const MENU_ITEMS = ['Resume', 'Comfort vignette', 'Camera banking', 'Debug overlay', 'Restart game'];
+const MENU_ITEMS = ['Resume', 'Flight', 'Comfort vignette', 'Camera banking', 'Debug overlay', 'Restart game'];
 
 export class Hud {
   constructor(game) {
@@ -152,10 +152,10 @@ export class Hud {
     g.font = '800 54px system-ui, sans-serif';
     g.textAlign = 'center';
     g.fillText('PAUSED', 256, 84);
-    const vals = [null, o.vignette, o.bank, o.debug, null];
+    const vals = [null, o.flightMode, o.vignette, o.bank, o.debug, null];
     g.font = '600 32px system-ui, sans-serif';
     for (let i = 0; i < MENU_ITEMS.length; i++) {
-      const y = 160 + i * 64;
+      const y = 140 + i * 54;
       if (i === this.menuIndex) {
         g.fillStyle = 'rgba(255,143,58,0.3)';
         roundRect(g, 40, y - 40, 432, 56, 12); g.fill();
@@ -165,8 +165,13 @@ export class Hud {
       g.fillText(MENU_ITEMS[i], 60, y);
       if (vals[i] !== null) {
         g.textAlign = 'right';
-        g.fillStyle = vals[i] ? '#9dff9d' : '#ff9d9d';
-        g.fillText(vals[i] ? 'ON' : 'OFF', 452, y);
+        if (typeof vals[i] === 'string') {
+          g.fillStyle = '#9fdcff';
+          g.fillText(vals[i] === 'hands' ? 'HANDS' : 'GAZE', 452, y);
+        } else {
+          g.fillStyle = vals[i] ? '#9dff9d' : '#ff9d9d';
+          g.fillText(vals[i] ? 'ON' : 'OFF', 452, y);
+        }
       }
     }
     g.textAlign = 'center';
