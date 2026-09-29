@@ -9,6 +9,8 @@ import { FLIGHT, WEAPONS } from '../config.js';
 const _o = new Vector3();
 const _d = new Vector3();
 const _v = new Vector3();
+const _q0 = new Vector3();
+const _q1 = new Vector3();
 
 class Blast {
   constructor() {
@@ -21,6 +23,8 @@ class Blast {
     this.radius = 0.3;
     this.life = 0;
     this.age = 0;
+    this.target = null;
+    this.speed = 0;
   }
 }
 
@@ -40,21 +44,28 @@ class Hand {
 
 const BEAM_VS = /* glsl */ `
 varying vec2 vUv;
+varying float vFacing;
 void main() {
   vUv = uv;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec4 mv = modelViewMatrix * vec4(position, 1.0);
+  vec3 n = normalize(normalMatrix * normal);
+  vFacing = abs(dot(n, normalize(-mv.xyz))); // 1 at the centre line, 0 at the edges
+  gl_Position = projectionMatrix * mv;
 }
 `;
 const BEAM_FS = /* glsl */ `
 uniform float uTime;
 uniform float uIntensity;
 uniform float uLength;
+uniform vec3 uColor;
+uniform float uSharp;
 varying vec2 vUv;
+varying float vFacing;
 void main() {
   float along = vUv.y * uLength;
-  float band = 0.6 + 0.4 * sin(along * 0.6 - uTime * 40.0);
-  float edge = 1.0 - abs(vUv.x * 2.0 - 1.0);
-  vec3 col = mix(vec3(0.3, 0.7, 1.0), vec3(0.9, 0.97, 1.0), band) * (0.6 + edge * 0.8);
+  float band = 0.75 + 0.25 * sin(along * 0.35 - uTime * 60.0) * sin(along * 0.11 + uTime * 23.0);
+  float prof = pow(vFacing, uSharp);
+  vec3 col = uColor * prof * band + vec3(1.0) * pow(vFacing, uSharp * 4.0) * 0.8;
   gl_FragColor = vec4(col * uIntensity, 1.0);
 }
 `;
@@ -72,19 +83,26 @@ export class Weapons {
     this.beamDir = new Vector3();
     this.beamLen = 0;
 
-    const geo = new CylinderGeometry(1, 1, 1, 12, 1, true);
+    // Unibeam: a white-hot core tube inside a wider cyan glow tube (soft
+    // fresnel edges), plus sprite halos, spiral energy and an impact flare.
+    const geo = new CylinderGeometry(1, 1, 1, 14, 1, true);
     geo.translate(0, 0.5, 0);
     geo.rotateX(-Math.PI / 2); // along -Z
-    this.beamMat = new ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uIntensity: { value: 1 }, uLength: { value: 100 } },
-      vertexShader: BEAM_VS, fragmentShader: BEAM_FS,
-      transparent: true, depthWrite: false, blending: AdditiveBlending,
-    });
-    this.beam = new Mesh(geo, this.beamMat);
-    this.beam.frustumCulled = false;
-    this.beam.visible = false;
-    this.beam.renderOrder = 12;
-    scene.add(this.beam);
+    const mkBeam = (color, sharp) => {
+      const mat = new ShaderMaterial({
+        uniforms: { uTime: { value: 0 }, uIntensity: { value: 1 }, uLength: { value: 100 }, uColor: { value: color }, uSharp: { value: sharp } },
+        vertexShader: BEAM_VS, fragmentShader: BEAM_FS,
+        transparent: true, depthWrite: false, blending: AdditiveBlending,
+      });
+      const m = new Mesh(geo, mat);
+      m.frustumCulled = false;
+      m.visible = false;
+      m.renderOrder = 12;
+      scene.add(m);
+      return m;
+    };
+    this.beamCore = mkBeam(new Vector3(0.7, 0.9, 1.0), 1.5);
+    this.beamGlow = mkBeam(new Vector3(0.15, 0.5, 1.0), 2.5);
   }
 
   clear() {
@@ -105,7 +123,7 @@ export class Weapons {
       h.dir.set(-e[8], -e[9], -e[10]).normalize();
       if (!input.xr) {
         // desktop: both hands converge on the screen centre
-        _v.copy(this.game.stepInput.look).multiplyScalar(60).add(this.game.headWorld).sub(h.pos).normalize();
+        _v.copy(this.game.look).multiplyScalar(60).add(this.game.headWorld).sub(h.pos).normalize();
         h.dir.copy(_v);
       }
     }
@@ -123,8 +141,12 @@ export class Weapons {
     const sp = charged ? WEAPONS.chargedSpeed : WEAPONS.quickSpeed;
     b.pos.copy(h.pos).addScaledVector(h.dir, 0.15);
     b.prevPos.copy(b.pos);
+    // Aim assist: bend the shot toward a goon near the aim ray (with lead).
+    b.target = this.assistTarget(h.pos, h.dir, sp, _d);
+    if (!b.target) _d.copy(h.dir);
     // inherit player velocity so shots don't lag when flying fast
-    b.vel.copy(h.dir).multiplyScalar(sp).add(g.body.vel);
+    b.speed = sp;
+    b.vel.copy(_d).multiplyScalar(sp).add(g.body.vel);
     b.life = WEAPONS.life;
     b.age = 0;
     h.flash = charged ? 0.14 : 0.07;
@@ -133,6 +155,33 @@ export class Weapons {
     g.body.impulse(-h.dir.x * recoil, -h.dir.y * recoil, -h.dir.z * recoil);
     g.input.haptic(h.name, charged ? 0.9 : 0.4, charged ? 90 : 35);
     g.audio.play(charged ? 'charged' : 'blast', h.pos.x, h.pos.y, h.pos.z, 1);
+  }
+
+  // Best goon for aim assist from origin o along dir; writes the aim direction.
+  assistTarget(o, dir, speed, outDir) {
+    const list = this.game.enemies.list;
+    const cosA = Math.cos(WEAPONS.assistDeg * Math.PI / 180);
+    let best = null, bestScore = -Infinity;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e.active) continue;
+      const cx = e.pos.x - o.x, cy = e.pos.y + 1.1 * e.scale - o.y, cz = e.pos.z - o.z;
+      const d = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      if (d > WEAPONS.assistRange || d < 1) continue;
+      const along = (cx * dir.x + cy * dir.y + cz * dir.z);
+      if (along <= 0) continue;
+      const c = along / d;
+      const miss = Math.sqrt(Math.max(0, d * d - along * along)); // distance from ray
+      if (c < cosA && miss > WEAPONS.assistRadius * e.scale) continue;
+      const score = c - d * 0.0002;
+      if (score > bestScore) { bestScore = score; best = e; }
+    }
+    if (best && outDir) {
+      const cx = best.pos.x - o.x, cy = best.pos.y + 1.1 * best.scale - o.y, cz = best.pos.z - o.z;
+      const T = Math.sqrt(cx * cx + cy * cy + cz * cz) / speed;
+      outDir.set(cx + best.vel.x * T, cy + best.vel.y * T * 0.5, cz + best.vel.z * T).normalize();
+    }
+    return best;
   }
 
   fixed(dt) {
@@ -174,6 +223,18 @@ export class Weapons {
       if (!b.active) continue;
       n++;
       b.prevPos.copy(b.pos);
+      // Gentle homing toward the assisted target.
+      const t = b.target;
+      if (t && t.active) {
+        _v.set(t.pos.x - b.pos.x, t.pos.y + 1.1 * t.scale - b.pos.y, t.pos.z - b.pos.z).normalize();
+        const sp = b.vel.length();
+        _o.copy(b.vel).multiplyScalar(1 / sp);
+        if (_o.dot(_v) > 0.5) {
+          const k = Math.min(1, (b.charged ? WEAPONS.homingCharged : WEAPONS.homingQuick) * dt);
+          _o.lerp(_v, k).normalize();
+          b.vel.copy(_o).multiplyScalar(sp);
+        }
+      }
       b.pos.addScaledVector(b.vel, dt);
       b.life -= dt;
       b.age += dt;
@@ -215,7 +276,7 @@ export class Weapons {
     }
     if (this.unibeamTime > 0) {
       this.unibeamTime -= dt;
-      const look = g.stepInput.look;
+      const look = g.look;
       const o = this.beamOrigin.copy(g.headWorld);
       o.y -= 0.35;
       o.addScaledVector(look, 0.3);
@@ -287,14 +348,21 @@ export class Weapons {
       const b = this.blasts[i];
       if (!b.active) continue;
       _o.lerpVectors(b.prevPos, b.pos, alpha);
-      // short trail behind the blast (relative to the shooter's frame)
-      const trail = b.charged ? 0.05 : 0.035;
+      // Laser bolt: long white-hot core + coloured halo, streaked along its
+      // motion relative to the shooter.
       _v.copy(b.vel).sub(g.body.vel);
-      const tl = Math.min(trail, b.age + 0.01);
+      const flick = 0.9 + 0.1 * Math.sin(g.time * 90 + i * 7);
       if (b.charged) {
-        sp.push(_o.x - _v.x * tl, _o.y - _v.y * tl, _o.z - _v.z * tl, _o.x, _o.y, _o.z, b.radius, 0.35, 0.65, 1.0, 1, 0.45);
+        const tl = Math.min(0.05, b.age + 0.01);
+        const tx = _o.x - _v.x * tl, ty = _o.y - _v.y * tl, tz = _o.z - _v.z * tl;
+        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, b.radius * 3.2 * flick, 0.05, 0.35, 1.0, 0.8, 0);
+        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, b.radius * 1.2 * flick, 0.25, 0.65, 1.0, 1, 0.6);
       } else {
-        sp.push(_o.x - _v.x * tl, _o.y - _v.y * tl, _o.z - _v.z * tl, _o.x, _o.y, _o.z, b.radius, 0.45, 0.75, 1.0, 1, 0.35);
+        const tl = Math.min(0.03, b.age + 0.01);
+        const tx = _o.x - _v.x * tl, ty = _o.y - _v.y * tl, tz = _o.z - _v.z * tl;
+        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, 1.0 * flick, 0.05, 0.35, 1.0, 0.75, 0);
+        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, 0.22 * flick, 0.2, 0.6, 1.0, 1, 0.7);
+        sp.pushPoint(_o.x, _o.y, _o.z, 0.45 * flick, 0.4, 0.75, 1.0, 1, 0.5);
       }
     }
     const input = g.input;
@@ -320,42 +388,64 @@ export class Weapons {
       const start = Math.min(1.0, this.beamLen);
       const len = Math.max(0.01, this.beamLen - start);
       _o.copy(o).addScaledVector(d, start);
-      this.beam.visible = true;
-      this.beam.position.copy(_o);
       _v.copy(_o).sub(d);
-      this.beam.lookAt(_v);
-      const w = 0.22 * (0.85 + 0.15 * Math.sin(g.time * 50));
-      this.beam.scale.set(w, w, len);
-      this.beamMat.uniforms.uTime.value = g.time;
-      this.beamMat.uniforms.uIntensity.value = k;
-      this.beamMat.uniforms.uLength.value = len;
-      const h0 = Math.min(3, this.beamLen);
-      sp.push(o.x + d.x * h0, o.y + d.y * h0, o.z + d.z * h0, o.x + d.x * this.beamLen, o.y + d.y * this.beamLen, o.z + d.z * this.beamLen,
-        0.7, 0.25, 0.55, 1.0, 0.35 * k, 0.15);
-      sp.pushPoint(_o.x, _o.y, _o.z, 0.18, 0.5, 0.8, 1.0, k, 0.6);
+      const wob = 0.9 + 0.1 * Math.sin(g.time * 70);
+      for (let m = 0; m < 2; m++) {
+        const beam = m === 0 ? this.beamCore : this.beamGlow;
+        beam.visible = true;
+        beam.position.copy(_o);
+        beam.lookAt(_v);
+        const w = (m === 0 ? 0.28 : 0.9) * wob;
+        beam.scale.set(w, w, len);
+        const u = beam.material.uniforms;
+        u.uTime.value = g.time; u.uIntensity.value = k; u.uLength.value = len;
+      }
+      // spiral energy around the beam
+      _q0.set(0, 1, 0);
+      if (Math.abs(d.y) > 0.9) _q0.set(1, 0, 0);
+      _q1.crossVectors(d, _q0).normalize();
+      _q0.crossVectors(_q1, d);
+      const n = Math.min(40, Math.floor(len / 4));
+      for (let s2 = 0; s2 < n; s2++) {
+        const t = start + (s2 + 0.5) * (len / n);
+        const ang = t * 0.5 - g.time * 25;
+        const rr = 0.8;
+        const ca = Math.cos(ang) * rr, sa = Math.sin(ang) * rr;
+        sp.pushPoint(o.x + d.x * t + _q1.x * ca + _q0.x * sa, o.y + d.y * t + _q1.y * ca + _q0.y * sa,
+          o.z + d.z * t + _q1.z * ca + _q0.z * sa, 0.22, 0.3, 0.7, 1.0, 0.6 * k, 0.4);
+      }
+      sp.pushPoint(_o.x, _o.y, _o.z, 0.35, 0.5, 0.8, 1.0, k, 0.6);
       _v.copy(o).addScaledVector(d, this.beamLen);
-      sp.pushPoint(_v.x, _v.y, _v.z, 2.5, 0.5, 0.8, 1.0, k, 0.4);
+      const fl = 3 + Math.sin(g.time * 40) * 0.6;
+      sp.pushPoint(_v.x, _v.y, _v.z, fl, 0.4, 0.75, 1.0, k, 0.5);
+      sp.pushPoint(_v.x, _v.y, _v.z, fl * 2.2, 0.2, 0.45, 1.0, 0.4 * k, 0);
     } else {
-      this.beam.visible = false;
+      this.beamCore.visible = false;
+      this.beamGlow.visible = false;
     }
-    // Crosshair dots where each hand points (only while a trigger is half-pressed, VR only)
+    // Laser sight from each hand (VR, while a finger is on the trigger) with a
+    // dot where it lands, and a lock-on marker on the goon aim assist would hit.
     const ov = g.overlaySprites;
     if (input.xr) {
       for (let i = 0; i < 2; i++) {
         const h = this.hands[i];
-        if (h.value < 0.1) continue;
+        if (h.value < 0.02) continue;
         const c = g.collision;
-        let dist = c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, 400);
-        _v.copy(h.dir).multiplyScalar(dist).add(h.pos);
-        const e = g.enemies.segmentHit(h.pos.x, h.pos.y, h.pos.z, _v.x, _v.y, _v.z, 0.2);
-        if (e) {
-          dist = Math.max(0.5, Math.hypot(e.pos.x - h.pos.x, g.enemies.lastHitY - h.pos.y, e.pos.z - h.pos.z) - 0.3);
+        let dist = Math.min(c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, 400), 400);
+        const lock = this.assistTarget(h.pos, h.dir, WEAPONS.quickSpeed, null);
+        const k = 0.35 + 0.65 * Math.min(1, h.value / 0.55);
+        const len = Math.min(dist, 120);
+        const cr = i === 0 ? 0.3 : 1.0, cg = i === 0 ? 0.7 : 0.35, cb = i === 0 ? 1.0 : 0.25;
+        sp.push(h.pos.x + h.dir.x * 0.08, h.pos.y + h.dir.y * 0.08, h.pos.z + h.dir.z * 0.08,
+          h.pos.x + h.dir.x * len, h.pos.y + h.dir.y * len, h.pos.z + h.dir.z * len, 0.004, cr, cg, cb, 0.55 * k, 0.6);
+        _v.copy(h.dir).multiplyScalar(Math.min(dist, 150)).add(h.pos);
+        ov.pushPoint(_v.x, _v.y, _v.z, 0.004 * Math.min(dist, 150) + 0.01, 1.0, 0.9, 0.7, 0.8 * k, 0.5);
+        if (lock) {
+          const lx = lock.pos.x, ly = lock.pos.y + 1.1 * lock.scale, lz = lock.pos.z;
+          const ld = Math.hypot(lx - g.headWorld.x, ly - g.headWorld.y, lz - g.headWorld.z);
+          const pulse = 0.8 + 0.2 * Math.sin(g.time * 20);
+          ov.pushPoint(lx, ly, lz, ld * 0.012 * pulse, 1.0, 0.2, 0.15, 0.6 * k, 0.15);
         }
-        dist = Math.min(dist, 150);
-        _v.copy(h.dir).multiplyScalar(dist).add(h.pos);
-        const size = 0.004 * dist + 0.01;
-        if (e) ov.pushPoint(_v.x, _v.y, _v.z, size * 1.6, 1.0, 0.35, 0.2, 1, 0.5);
-        else ov.pushPoint(_v.x, _v.y, _v.z, size, 1.0, 0.85, 0.6, 0.9, 0.5);
       }
     }
   }

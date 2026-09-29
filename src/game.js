@@ -18,6 +18,7 @@ const _v = new Vector3();
 const _v2 = new Vector3();
 const _q = new Quaternion();
 const _look = new Vector3();
+const _thrustLook = new Vector3(0, 0, -1);
 const _right = new Vector3();
 const _fwd = new Vector3();
 const _headW = new Vector3();
@@ -72,6 +73,7 @@ export class Game {
     this.state = 'playing'; // 'playing' | 'paused' | 'dead'
     this.boostMeter = 1;
     this.boostIdle = 0;
+    this.gripSmooth = 0;
     this.hp = PLAYER.maxHp;
     this.hurtTimer = 0;
     this.score = 0;
@@ -80,14 +82,14 @@ export class Game {
     this.snapPulse = 0;
     this.audioTimer = 0;
     this.stepInput = {
-      grip: 0, boost: false, look: _look, stickX: 0, stickY: 0, right: _right, fwd: _fwd,
+      grip: 0, boost: false, look: _thrustLook, stickX: 0, stickY: 0, right: _right, fwd: _fwd,
     };
     this.options = { vignette: true, bank: FLIGHT.bankEnabled, debug: false };
 
     // Systems
     this.sprites = new SpriteBatch(640);
     scene.add(this.sprites.mesh);
-    this.overlaySprites = new SpriteBatch(8, { depthTest: false, renderOrder: 999 });
+    this.overlaySprites = new SpriteBatch(128, { depthTest: false, renderOrder: 999 });
     scene.add(this.overlaySprites.mesh);
     this.particles = new Particles(scene);
     const cap = ENEMY.maxActive;
@@ -148,6 +150,8 @@ export class Game {
   }
 
   get headWorld() { return _headW; }
+  // Raw head look direction (aiming, culling). Thrust uses a smoothed copy.
+  get look() { return _look; }
 
   // ------------------------------------------------------------ game events
   damagePlayer(amount, dx, dy, dz, knock) {
@@ -341,7 +345,16 @@ export class Game {
       this.boostIdle += dt;
       if (this.boostIdle > FLIGHT.boostRefillDelay) this.boostMeter = Math.min(1, this.boostMeter + FLIGHT.boostRefillPerSec * dt);
     }
-    si.grip = alive ? input.grip : 0;
+    // Smooth the grip (analog triggers are noisy) and the thrust direction, so
+    // glancing around doesn't yank the flight path.
+    const rawGrip = alive && input.grip > FLIGHT.gripDeadzone ? input.grip : 0;
+    this.gripSmooth += (rawGrip - this.gripSmooth) * Math.min(1, dt * FLIGHT.gripSmoothing);
+    const lk = Math.min(1, dt * FLIGHT.lookSmoothing);
+    _thrustLook.x += (_look.x - _thrustLook.x) * lk;
+    _thrustLook.y += (_look.y - _thrustLook.y) * lk;
+    _thrustLook.z += (_look.z - _thrustLook.z) * lk;
+    _thrustLook.normalize();
+    si.grip = this.gripSmooth;
     si.boost = wantBoost;
     si.stickX = alive ? input.stickX : 0;
     si.stickY = alive ? input.stickY : 0;
@@ -395,6 +408,39 @@ export class Game {
     this.bank.position.set(h.x - _v2.x, h.y - _v2.y, h.z - _v2.z);
   }
 
+  // Enemy markers (drawn through walls): a glowing tag above goons in view,
+  // and a pip at the edge of vision pointing toward goons outside it.
+  renderMarkers() {
+    if (this.state !== 'playing') return;
+    const ov = this.overlaySprites;
+    const head = _headW, look = _look;
+    const cosIn = Math.cos(ENEMY.markerAngle * Math.PI / 180);
+    const list = this.enemies.list;
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e.active) continue;
+      const tx = e.pos.x, ty = e.pos.y + 2.4 * e.scale + 0.6, tz = e.pos.z;
+      const dx = tx - head.x, dy = ty - head.y, dz = tz - head.z;
+      const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (d < 10) continue;
+      const c = (dx * look.x + dy * look.y + dz * look.z) / d;
+      const r = e.boss ? 1.0 : 1.0, gg = e.boss ? 0.15 : 0.55, b = e.boss ? 0.1 : 0.12;
+      const pulse = 0.75 + 0.25 * Math.sin(this.time * 6 + i);
+      if (c > cosIn) {
+        const size = d * (e.boss ? 0.016 : 0.011);
+        ov.pushPoint(tx, ty, tz, size, r, gg, b, 0.85 * pulse, 0.5);
+      } else {
+        // direction perpendicular to the view axis, placed on a 35 deg ring
+        let px = dx / d - look.x * c, py = dy / d - look.y * c, pz = dz / d - look.z * c;
+        const pl = Math.sqrt(px * px + py * py + pz * pz) || 1;
+        px /= pl; py /= pl; pz /= pl;
+        const R = 1.2;
+        ov.pushPoint(head.x + (look.x * 0.82 + px * 0.57) * R, head.y + (look.y * 0.82 + py * 0.57) * R,
+          head.z + (look.z * 0.82 + pz * 0.57) * R, e.boss ? 0.03 : 0.018, 1.0, 0.25, 0.12, 0.9 * pulse, 0.5);
+      }
+    }
+  }
+
   renderFrame(dt, alpha) {
     const sp = this.sprites;
     sp.begin();
@@ -406,6 +452,7 @@ export class Game {
     this.bats.render(gr, alpha);
     gr.end();
     this.weapons.render(dt, alpha);
+    this.renderMarkers();
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       if (f.life <= 0) continue;

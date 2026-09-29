@@ -62,7 +62,7 @@ export class Waves {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0 && en.activeCount < ENEMY.maxActive) {
       if (this.bossPending) {
-        const r = this.pickRoof(120, 320, 9, 60);
+        const r = this.pickRoof(100, 260, 9, 60);
         if (r && en.spawn(r, true, false)) {
           this.bossPending = false;
           g.hud.showMessage('BOSS', 'Big Log Goon has entered the city', 3);
@@ -71,7 +71,7 @@ export class Waves {
         this.spawnTimer = 1.5;
       } else if (this.remaining > 0) {
         const climber = Math.random() < 0.3;
-        const r = this.pickRoof(90, 380, 4, climber ? 45 : 75);
+        const r = this.pickRoof(60, 240, 4, climber ? 45 : 75);
         if (r && en.spawn(r, false, climber)) this.remaining--;
         this.spawnTimer = 0.6 + Math.random() * 0.5;
       }

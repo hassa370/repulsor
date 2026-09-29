@@ -36,7 +36,7 @@ test('some grip value hovers (thrust.y == g) with no forward drift', () => {
     if (out.y < FLIGHT.gravity) lo = m; else hi = m;
   }
   computeThrust(lo, look, false, out);
-  assert.ok(lo > 0.2 && lo < 0.5, `hover grip ${lo}`);
+  assert.ok(lo > 0.1 && lo <= 0.25, `hover grip ${lo}`);
   assert.ok(Math.abs(out.z) < 0.5, 'hover has little forward push');
 });
 
@@ -51,6 +51,14 @@ test('full grip looking straight down dives', () => {
   assert.ok(out.y < 0);
 });
 
+test('hover plateau: a wide grip range gives exactly hover thrust', () => {
+  for (const g of [0.22, 0.3, 0.4, 0.45]) {
+    computeThrust(g, look, false, out);
+    assert.ok(Math.abs(out.y - FLIGHT.gravity) < 1e-6, `g=${g} y=${out.y}`);
+    assert.ok(Math.abs(out.z) < 1e-9);
+  }
+});
+
 test('boost multiplies thrust', () => {
   const a = computeThrust(1, look, false, new Vector3()).length();
   const b = computeThrust(1, look, true, new Vector3()).length();
@@ -61,7 +69,7 @@ test('hover assist settles vertical speed', () => {
   const p = new PlayerBody(world());
   p.reset(-50, 30, 0);
   p.vel.y = 3;
-  let hoverGrip = 0.33;
+  let hoverGrip = 0.35;
   for (let i = 0; i < 90 * 4; i++) p.step(1 / 90, input(hoverGrip));
   assert.ok(Math.abs(p.vel.y) < 1.0, `vy=${p.vel.y}`);
 });

@@ -16,8 +16,9 @@ varying float vCore;
 varying vec4 vColor;
 void main() {
   vec3 a = aA.xyz, b = aB.xyz;
-  float r = aA.w;
   vec3 mid = (a + b) * 0.5;
+  // Never thinner than ~2 px so distant bolts stay visible glows, not hairlines.
+  float r = max(aA.w, length(cameraPosition - mid) * 0.0016);
   vec3 viewDir = normalize(cameraPosition - mid);
   vec3 axis = b - a;
   float len = length(axis);
@@ -47,9 +48,10 @@ void main() {
   float dy = max(0.0, max(-vQ.y, vQ.y - vLen));
   float d = length(vec2(vQ.x, dy));
   if (d > 1.0) discard;
-  float g = (1.0 - d);
-  g *= g;
-  vec3 c = vColor.rgb * g + vec3(1.0) * smoothstep(1.0 - vCore, 1.0, 1.0 - d) * 0.9;
+  // Laser-style profile: white-hot core, saturated inner glow, soft halo.
+  float halo = exp(-d * d * 5.0) * (1.0 - d);
+  float hot = vCore > 0.0 ? 1.0 - smoothstep(vCore * 0.35, vCore, d) : 0.0;
+  vec3 c = vColor.rgb * (halo * 1.3 + hot * 0.6) + vec3(1.0) * hot;
   gl_FragColor = vec4(c * vColor.a, 1.0);
 }
 `;

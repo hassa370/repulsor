@@ -80,7 +80,7 @@ export class Enemies {
     const g = this.game;
     e.active = true;
     e.boss = boss;
-    e.scale = boss ? ENEMY.bossScale : 0.95 + Math.random() * 0.15;
+    e.scale = boss ? ENEMY.bossScale : ENEMY.goonScale * (0.95 + Math.random() * 0.15);
     e.hp = boss ? ENEMY.bossHp : ENEMY.hp;
     e.hasBat = true;
     e.spotted = false;
@@ -185,7 +185,7 @@ export class Enemies {
     for (let i = 0; i < this.list.length; i++) {
       const e = this.list[i];
       if (!e.active) continue;
-      const er = RADIUS * e.scale * 1.15;
+      const er = RADIUS * e.scale * ENEMY.hitRadiusScale;
       const r = er + radius;
       const ex = e.pos.x, ez = e.pos.z;
       if (ex < Math.min(ax, bx) - r || ex > Math.max(ax, bx) + r || ez < Math.min(az, bz) - r || ez > Math.max(az, bz) + r) continue;
@@ -600,7 +600,7 @@ export class Enemies {
   render(renderer, dt, alpha) {
     const g = this.game;
     const head = g.headWorld;
-    const look = g.stepInput.look;
+    const look = g.look;
     let vis = 0;
     for (let i = 0; i < this.list.length; i++) {
       const e = this.list[i];

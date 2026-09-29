@@ -4,21 +4,30 @@ import { FLIGHT } from '../config.js';
 const _dir = new Vector3();
 const _acc = new Vector3();
 
-// Thrust direction model:
-//  * light squeeze (below FLIGHT.tiltStart) pushes straight up -> stable hover
-//  * squeezing harder tilts the thrust vector toward where the head looks,
-//    up to lookDir * thrustForwardGain + up * thrustUpBias at full grip.
-// Looking down at full grip therefore dives, looking up climbs.
+// Thrust model (grip g in 0..1):
+//  * 0 .. hoverLo        : lift ramps up to exactly the hover level (gentle descent)
+//  * hoverLo .. hoverHi  : hover PLATEAU: thrust == gravity, straight up, so a wide
+//                          range of finger pressure holds you steady in the air
+//  * hoverHi .. 1        : more power, and the thrust vector tilts toward where
+//                          the head looks (look down = dive, look up = climb)
 export function computeThrust(grip, look, boost, out) {
   const g = Math.pow(Math.min(Math.max(grip, 0), 1), FLIGHT.gripCurve);
   if (g <= 0) return out.set(0, 0, 0);
-  const t = Math.min(Math.max((g - FLIGHT.tiltStart) / (1 - FLIGHT.tiltStart), 0), 1);
+  const hover = FLIGHT.gravity / FLIGHT.thrustMax;
+  const lo = FLIGHT.hoverLo, hi = FLIGHT.hoverHi;
+  let f, t = 0;
+  if (g < lo) f = hover * (g / lo);
+  else if (g <= hi) f = hover;
+  else {
+    t = (g - hi) / (1 - hi);
+    f = hover + (1 - hover) * t;
+  }
   const tilt = t * t * (3 - 2 * t) * FLIGHT.thrustForwardGain;
   _dir.set(look.x * tilt, look.y * tilt + FLIGHT.thrustUpBias, look.z * tilt);
   const len = _dir.length();
   if (len < 1e-5) _dir.set(look.x, look.y, look.z); // pure-down dive
   else _dir.multiplyScalar(1 / len);
-  return out.copy(_dir).multiplyScalar(g * FLIGHT.thrustMax * (boost ? FLIGHT.boostMult : 1));
+  return out.copy(_dir).multiplyScalar(f * FLIGHT.thrustMax * (boost ? FLIGHT.boostMult : 1));
 }
 
 export class PlayerBody {
@@ -60,6 +69,12 @@ export class PlayerBody {
       acc.z += (input.right.z * sx + input.fwd.z * sy) * s;
     }
 
+    // Air brake: hovering (light grip, stick centred) bleeds off horizontal drift
+    // so you can stop and hold position to aim.
+    if (input.grip > 0.05 && input.grip < FLIGHT.hoverHi + 0.05 && Math.abs(sx) + Math.abs(sy) < 0.1 && !input.boost) {
+      const k = Math.min(1, FLIGHT.airBrake * dt);
+      v.x -= v.x * k; v.z -= v.z * k;
+    }
     // Hover assist: when thrust roughly cancels gravity, bleed off vertical velocity.
     const netY = acc.y;
     if (input.grip > 0.05 && Math.abs(netY) < FLIGHT.hoverWindow) {

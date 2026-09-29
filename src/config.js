@@ -37,24 +37,29 @@ export const BINDINGS = {
 export const FLIGHT = {
   gravity: 9.8,
   thrustMax: 32, // m/s^2 at full grip
-  thrustForwardGain: 1.6, // how much the look direction tilts thrust at full grip
+  thrustForwardGain: 1.3, // how much the look direction tilts thrust at full grip
   thrustUpBias: 1.0, // upward bias so a light squeeze hovers
-  tiltStart: 0.3, // grip below this = pure vertical lift (hover); above tilts toward look dir
+  hoverLo: 0.2, // grip where the hover plateau starts (below: gentle descent)
+  hoverHi: 0.45, // grip where the plateau ends (above: more power + tilt toward look dir)
   gripCurve: 1.0, // grip response exponent (>1 = finer control at light squeeze)
-  strafeAccel: 10, // left stick lateral / forward accel (m/s^2)
+  gripDeadzone: 0.06, // ignore resting finger pressure on the grip
+  gripSmoothing: 7, // 1/s low-pass on grip input (higher = snappier)
+  lookSmoothing: 2.5, // 1/s: how fast thrust direction follows the head (lower = calmer)
+  airBrake: 1.2, // 1/s horizontal damping while hovering with the stick centred
+  strafeAccel: 7, // left stick lateral / forward accel (m/s^2)
   boostMult: 2.5,
   boostDrainPerSec: 0.35, // meter units (0..1) per second
   boostRefillPerSec: 0.18,
   boostRefillDelay: 0.8, // s after release before refill starts
   dragQuadratic: 0.0065, // a = -k |v| v   -> natural top speed
   dragLinear: 0.04,
-  hoverAssist: 3.5, // vertical velocity damping (1/s) when thrust ~ balances gravity
-  hoverWindow: 2.5, // |net vertical accel| below this engages assist (m/s^2)
+  hoverAssist: 5, // vertical velocity damping (1/s) when thrust ~ balances gravity
+  hoverWindow: 4, // |net vertical accel| below this engages assist (m/s^2)
   groundFriction: 8, // 1/s horizontal damping while standing
   walkSpeed: 3.5,
   capsuleRadius: 0.35,
   capsuleHeight: 1.75,
-  restitution: 0.25, // velocity reflection on building impact
+  restitution: 0.08, // velocity reflection on building impact
   wallFriction: 0.15, // tangential velocity loss on impact
   impactHapticSpeed: 4, // m/s normal speed for a haptic thump
   bankEnabled: true,
@@ -81,6 +86,11 @@ export const WEAPONS = {
   fireCooldown: 0.12,
   life: 3.0,
   headshotMult: 2,
+  assistDeg: 7, // aim assist: snap shots to a goon within this cone...
+  assistRadius: 2.5, // ...or passing within this many metres of it
+  assistRange: 380,
+  homingQuick: 2.5, // 1/s steering of blasts toward their assisted target
+  homingCharged: 4,
   unibeamCooldown: 10,
   unibeamDuration: 1.4,
   unibeamRange: 450,
@@ -91,6 +101,9 @@ export const WEAPONS = {
 
 export const ENEMY = {
   maxActive: 40,
+  goonScale: 1.25, // overall size of regular goons (bigger = easier to spot and hit)
+  hitRadiusScale: 1.7, // blast hitbox radius relative to the body
+  markerAngle: 40, // deg: goons inside this cone get a marker above them, outside an edge pip
   hp: 2,
   bossHp: 30,
   bossScale: 3,
@@ -135,7 +148,7 @@ export const WORLD = {
   sunDir: [-0.25, 0.12, -0.96],
   sunColor: 0xffb070,
   sunIntensity: 2.2,
-  fogDensity: 0.00115,
+  fogDensity: 0.00095,
   drawDistance: 1100,
 };
 
