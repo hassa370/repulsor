@@ -376,9 +376,6 @@ export class Weapons {
         const c = Math.min(1, h.held / WEAPONS.fullChargeTime);
         const pulse = 0.85 + 0.15 * Math.sin(g.time * 30);
         sp.pushPoint(h.pos.x + h.dir.x * 0.07, h.pos.y + h.dir.y * 0.07, h.pos.z + h.dir.z * 0.07, (0.03 + 0.09 * c) * pulse, 0.4, 0.7, 1.0, 0.6 + 0.4 * c, 0.5);
-      } else if (input.xr) {
-        // idle palm glow
-        sp.pushPoint(h.pos.x, h.pos.y, h.pos.z, 0.03, 0.4, 0.7, 1.0, 0.5, 0.3);
       }
     }
     // Unibeam visual (starts ~1 m ahead of the chest so it never fills the view)

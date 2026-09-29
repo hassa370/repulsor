@@ -13,7 +13,7 @@ import { Debris } from './enemy/debris.js';
 import { Waves } from './enemy/waves.js';
 import { Weapons } from './weapons/weapons.js';
 import { Hud } from './hud/hud.js';
-import { makeGauntlet } from './hud/hands.js';
+import { Gauntlet, makeFallbackGauntlet } from './hud/hands.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -37,7 +37,7 @@ class Wave3D {
 
 // Owns the player rig, fixed-step simulation and per-frame orchestration.
 export class Game {
-  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets }) {
+  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels }) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
@@ -119,8 +119,9 @@ export class Game {
     for (let i = 0; i < 4; i++) this.rings.push(new Wave3D());
 
     // Gauntlets: on grips in VR, on the fake aim points on desktop.
-    this.gauntL = makeGauntlet(-1);
-    this.gauntR = makeGauntlet(1);
+    // Iron Man gauntlets on a real skinned hand (fallback: simple armour block).
+    this.gauntL = handModels ? new Gauntlet(-1, handModels.left) : makeFallbackGauntlet();
+    this.gauntR = handModels ? new Gauntlet(1, handModels.right) : makeFallbackGauntlet();
     this.gauntParentL = null;
     this.gauntParentR = null;
 
@@ -251,8 +252,8 @@ export class Game {
     // VR only: on desktop the crosshair is enough.
     const pl = input.xr ? input.gripObject('left') : null;
     const pr = input.xr ? input.gripObject('right') : null;
-    if (pl !== this.gauntParentL) { if (pl) pl.add(this.gauntL); else this.gauntL.removeFromParent(); this.gauntParentL = pl; }
-    if (pr !== this.gauntParentR) { if (pr) pr.add(this.gauntR); else this.gauntR.removeFromParent(); this.gauntParentR = pr; }
+    if (pl !== this.gauntParentL) { if (pl) pl.add(this.gauntL.object); else this.gauntL.object.removeFromParent(); this.gauntParentL = pl; }
+    if (pr !== this.gauntParentR) { if (pr) pr.add(this.gauntR.object); else this.gauntR.object.removeFromParent(); this.gauntParentR = pr; }
   }
 
   // ------------------------------------------------------------------ frame
@@ -537,6 +538,23 @@ export class Game {
     ov.push(px + _v.x * r, py + _v.y * r, pz + _v.z * r, px + _v.x * r * 2, py + _v.y * r * 2, pz + _v.z * r * 2, 0.011, cr, cg, cb, al, 0.25);
   }
 
+  // Hands open flat (Iron Man style) while thrusting or firing, relax otherwise;
+  // the palm repulsor brightens with thrust, charge and muzzle flashes.
+  animateGauntlets(dt) {
+    const gaze = !this.stepInput.handMode;
+    for (let h = 0; h < 2; h++) {
+      const g = h === 0 ? this.gauntL : this.gauntR;
+      if (!g.object.parent) continue;
+      const wh = this.weapons.hands[h];
+      const thrust = gaze ? (h === 0 ? this.gripSmooth : 0) : this.handGrip[h];
+      const charge = wh.down ? Math.min(1, wh.held) : 0;
+      const firing = wh.down || wh.flash > 0 ? 1 : 0;
+      const open = Math.min(1, thrust * 3 + firing);
+      const glow = thrust * 1.8 + charge * 1.5 + (wh.flash > 0 ? 3 : 0) + (this.stepInput.boost ? 0.8 : 0);
+      g.update(dt, open, glow);
+    }
+  }
+
   // Repulsor exhaust out of each palm while its grip is squeezed.
   renderThrusters() {
     const sp = this.sprites;
@@ -600,6 +618,7 @@ export class Game {
     this.renderMarkers();
     if (this.state === 'playing') this.renderFlightHud();
     this.renderThrusters();
+    this.animateGauntlets(dt);
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       if (f.life <= 0) continue;
