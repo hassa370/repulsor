@@ -12,6 +12,7 @@ export class Perf {
     this._overBudget = 0;
     this._underBudget = 0;
     this.targetFps = RENDER.targetFps;
+    this.downgrades = 0; // after two drops we stay at the fallback rate (no oscillation)
     this.calls = 0;
     this.tris = 0;
   }
@@ -38,8 +39,8 @@ export class Perf {
     else this._overBudget = 0;
     if (this.targetFps !== RENDER.targetFps && this.cpuMs < (1000 / RENDER.targetFps) * 0.6 && this.frameMs < budget * 1.02) this._underBudget++;
     else this._underBudget = 0;
-    if (this.targetFps === RENDER.targetFps && this._overBudget >= 4) this.setRate(RENDER.fallbackFps);
-    else if (this.targetFps !== RENDER.targetFps && this._underBudget >= 20) this.setRate(RENDER.targetFps);
+    if (this.targetFps === RENDER.targetFps && this._overBudget >= 4) { this.downgrades++; this.setRate(RENDER.fallbackFps); }
+    else if (this.targetFps !== RENDER.targetFps && this.downgrades < 2 && this._underBudget >= 60) this.setRate(RENDER.targetFps);
   }
 
   setRate(hz) {

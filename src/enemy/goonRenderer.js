@@ -73,11 +73,12 @@ void main() {
 const SPRITE_FS = /* glsl */ `
 ${COMMON_GLSL}
 uniform sampler2D tSprite;
+uniform float uFlipY; // KTX2 textures are not flipped on upload
 varying vec2 vUv;
 varying vec3 vWorld;
 varying float vFlash;
 void main() {
-  vec4 t = texture2D(tSprite, vUv);
+  vec4 t = texture2D(tSprite, vec2(vUv.x, mix(vUv.y, 1.0 - vUv.y, uFlipY)));
   if (t.a < 0.5) discard;
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
@@ -116,7 +117,7 @@ function paintSprite(atlasCanvas) {
 
 export class GoonRenderer {
   // capacities: { head: n, body: n, ... , silhouette: n, sprite: n }
-  constructor(scene, atlas, parts, capacities, refImage) {
+  constructor(scene, atlas, parts, capacities, refImage, spriteKtx2) {
     this.material = new ShaderMaterial({
       uniforms: { ...U, tAtlas: { value: atlas } },
       vertexShader: VS,
@@ -144,7 +145,9 @@ export class GoonRenderer {
     this.SIL = PART_NAMES.length;
 
     // Sprite LOD
-    const spriteTex = refImage ? new CanvasTexture(refImage) : paintSprite(atlas.image);
+    // Far sprite: pre-compressed KTX2 if provided, else the reference image
+    // (when it has a transparent background), else a painted stand-in.
+    const spriteTex = spriteKtx2 || (refImage ? new CanvasTexture(refImage) : paintSprite(atlas.image));
     spriteTex.colorSpace = SRGBColorSpace;
     const cap = capacities.sprite;
     const g = new InstancedBufferGeometry();
@@ -164,7 +167,7 @@ export class GoonRenderer {
     this.spriteCap = cap;
     this.spriteCount = 0;
     this.spriteMesh = new Mesh(g, new ShaderMaterial({
-      uniforms: { ...U, tSprite: { value: spriteTex } }, vertexShader: SPRITE_VS, fragmentShader: SPRITE_FS,
+      uniforms: { ...U, tSprite: { value: spriteTex }, uFlipY: { value: spriteKtx2 ? 1 : 0 } }, vertexShader: SPRITE_VS, fragmentShader: SPRITE_FS,
     }));
     this.spriteMesh.frustumCulled = false;
     scene.add(this.spriteMesh);

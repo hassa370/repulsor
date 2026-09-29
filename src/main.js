@@ -46,7 +46,7 @@ async function init() {
   const sky = await makeSky(renderer);
   scene.background = sky.texture;
   scene.environment = sky.env;
-  scene.fog = new FogExp2(sky.fogColor, WORLD.fogDensity);
+  scene.fog = new FogExp2(sky.fogColor.clone().multiplyScalar(0.92), WORLD.fogDensity);
 
   status.textContent = 'Building city…';
   await new Promise((r) => setTimeout(r, 0));
@@ -59,10 +59,12 @@ async function init() {
 
   status.textContent = 'Carving Log Goons…';
   const ref = await loadReferenceImage(renderer);
+  if (ref.spriteTexture) console.info('Far-LOD sprite: KTX2');
   const goonAssets = {
     atlas: createAtlas(ref.image),
     parts: buildGoonGeometries(),
     spriteImage: ref.spriteImage,
+    spriteTexture: ref.spriteTexture,
   };
 
   const input = new Input(renderer, renderer.domElement);
@@ -106,6 +108,7 @@ function start() {
 }
 
 vrBtn.addEventListener('click', async () => {
+  game.audio.start(); // inside the user gesture, before any await
   try {
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: ['local-floor', 'bounded-floor'],
@@ -125,6 +128,7 @@ vrBtn.addEventListener('click', async () => {
 });
 
 deskBtn.addEventListener('click', () => {
+  game.audio.start();
   game.input.wantPointerLock = true;
   renderer.domElement.requestPointerLock();
   crosshair.style.display = 'block';

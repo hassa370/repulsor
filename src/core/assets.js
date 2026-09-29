@@ -22,8 +22,30 @@ function hasTransparentBackground(img) {
   return d[3] < 32 && d[(15) * 4 + 3] < 32 && d[(15 * 16) * 4 + 3] < 32 && d[(16 * 16 - 1) * 4 + 3] < 32;
 }
 
-export async function loadReferenceImage() {
-  const image = await loadImage('textures/enemy_face.png');
-  if (!image) return { image: null, spriteImage: null };
-  return { image, spriteImage: hasTransparentBackground(image) ? image : null };
+// Optional pre-compressed far-LOD sprite (KTX2 / Basis, with mipmaps):
+//   toktx --t2 --encode uastc --genmipmap public/textures/enemy_sprite.ktx2 enemy_sprite.png
+async function tryKtx2(renderer, url) {
+  try {
+    const head = await fetch(url, { method: 'HEAD' });
+    const type = head.headers.get('content-type') || '';
+    if (!head.ok || type.includes('text/html')) return null;
+    const { KTX2Loader } = await import('three/examples/jsm/loaders/KTX2Loader.js');
+    // Basis transcoder (JS + WASM) is bundled locally by Vite from three/examples.
+    const loader = new KTX2Loader().detectSupport(renderer);
+    const tex = await loader.loadAsync(url);
+    loader.dispose();
+    return tex;
+  } catch (e) {
+    console.warn('KTX2 load failed', url, e);
+    return null;
+  }
+}
+
+export async function loadReferenceImage(renderer) {
+  const [image, spriteTexture] = await Promise.all([
+    loadImage('textures/enemy_face.png'),
+    tryKtx2(renderer, 'textures/enemy_sprite.ktx2'),
+  ]);
+  const spriteImage = image && hasTransparentBackground(image) ? image : null;
+  return { image, spriteImage, spriteTexture };
 }

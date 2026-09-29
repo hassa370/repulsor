@@ -313,23 +313,28 @@ export class Weapons {
         sp.pushPoint(h.pos.x, h.pos.y, h.pos.z, 0.03, 0.4, 0.7, 1.0, 0.5, 0.3);
       }
     }
-    // Unibeam visual
+    // Unibeam visual (starts ~1 m ahead of the chest so it never fills the view)
     if (this.unibeamTime > 0) {
       const o = this.beamOrigin, d = this.beamDir;
       const k = Math.min(1, this.unibeamTime / 0.2) * Math.min(1, (WEAPONS.unibeamDuration - this.unibeamTime) / 0.08);
+      const start = Math.min(1.0, this.beamLen);
+      const len = Math.max(0.01, this.beamLen - start);
+      _o.copy(o).addScaledVector(d, start);
       this.beam.visible = true;
-      this.beam.position.copy(o);
-      _v.copy(o).sub(d);
+      this.beam.position.copy(_o);
+      _v.copy(_o).sub(d);
       this.beam.lookAt(_v);
-      const w = WEAPONS.unibeamRadius * 0.45 * (0.8 + 0.2 * Math.sin(g.time * 50));
-      this.beam.scale.set(w, w, this.beamLen);
+      const w = 0.22 * (0.85 + 0.15 * Math.sin(g.time * 50));
+      this.beam.scale.set(w, w, len);
       this.beamMat.uniforms.uTime.value = g.time;
       this.beamMat.uniforms.uIntensity.value = k;
-      this.beamMat.uniforms.uLength.value = this.beamLen;
-      sp.push(o.x, o.y, o.z, o.x + d.x * this.beamLen, o.y + d.y * this.beamLen, o.z + d.z * this.beamLen, WEAPONS.unibeamRadius, 0.25, 0.55, 1.0, 0.5 * k, 0.2);
-      sp.pushPoint(o.x, o.y, o.z, 0.5, 0.5, 0.8, 1.0, k, 0.6);
+      this.beamMat.uniforms.uLength.value = len;
+      const h0 = Math.min(3, this.beamLen);
+      sp.push(o.x + d.x * h0, o.y + d.y * h0, o.z + d.z * h0, o.x + d.x * this.beamLen, o.y + d.y * this.beamLen, o.z + d.z * this.beamLen,
+        0.7, 0.25, 0.55, 1.0, 0.35 * k, 0.15);
+      sp.pushPoint(_o.x, _o.y, _o.z, 0.18, 0.5, 0.8, 1.0, k, 0.6);
       _v.copy(o).addScaledVector(d, this.beamLen);
-      sp.pushPoint(_v.x, _v.y, _v.z, 3.5, 0.5, 0.8, 1.0, k, 0.4);
+      sp.pushPoint(_v.x, _v.y, _v.z, 2.5, 0.5, 0.8, 1.0, k, 0.4);
     } else {
       this.beam.visible = false;
     }

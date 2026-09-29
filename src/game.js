@@ -61,6 +61,7 @@ export class Game {
     this.body = new PlayerBody(collision);
     this.headLocal = new Vector3(0, 1.7, 0);
     this.lastOffset = new Vector3();
+    this.wasXR = false;
     this.deskPitch = 0;
     this.roll = 0;
     this.prevVel = new Vector3();
@@ -94,7 +95,7 @@ export class Game {
     this.goonRenderer = new GoonRenderer(scene, goonAssets.atlas, goonAssets.parts, {
       head: cap + debrisCap, body: cap + debrisCap, armL: cap + debrisCap, armR: cap + debrisCap,
       legL: cap + debrisCap, legR: cap + debrisCap, bat: cap * 2 + debrisCap, silhouette: cap, sprite: cap,
-    }, goonAssets.spriteImage);
+    }, goonAssets.spriteImage, goonAssets.spriteTexture);
     this.debris = new Debris(collision, debrisCap);
     this.enemies = new Enemies(this);
     this.bats = new Bats(this);
@@ -259,8 +260,10 @@ export class Game {
     this.attachGauntlets();
     this.weapons.updateAim();
 
-    // Room-scale steps move the capsule with the head.
+    // Room-scale steps move the capsule with the head. When entering / leaving
+    // VR the offset jumps, so re-baseline instead of moving the body.
     this.headOffset(_v);
+    if (input.xr !== this.wasXR) { this.lastOffset.copy(_v); this.wasXR = input.xr; }
     const dx = _v.x - this.lastOffset.x, dz = _v.z - this.lastOffset.z;
     this.lastOffset.copy(_v);
     this.body.pos.x += dx; this.body.pos.z += dz;

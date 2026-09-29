@@ -57,6 +57,7 @@ export class Waves {
       if (this.timer <= 0) this.startWave(this.wave + 1);
       return;
     }
+    if (this.state !== 'active') return;
     const en = g.enemies;
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0 && en.activeCount < ENEMY.maxActive) {

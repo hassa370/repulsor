@@ -223,8 +223,8 @@ export function buildAtmosphere(scene, sky) {
   scene.add(hemi);
 
   U.uSunDir.value.copy(sky.sunDir);
-  U.uSunColor.value.copy(sky.sunColor).multiplyScalar(1.1);
-  U.uFogColor.value.copy(sky.fogColor);
+  U.uSunColor.value.copy(sky.sunColor).multiplyScalar(1.35);
+  U.uFogColor.value.copy(sky.fogColor).multiplyScalar(0.92);
   U.uSkyHorizon.value.copy(sky.fogColor).multiplyScalar(1.25);
 
   const water = new Mesh(

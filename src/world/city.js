@@ -1,5 +1,5 @@
 import {
-  BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CylinderGeometry, DoubleSide, Group,
+  BoxGeometry, BufferAttribute, BufferGeometry, CanvasTexture, CylinderGeometry, Group,
   InstancedMesh, Matrix4, Mesh, MeshBasicMaterial, MeshLambertMaterial, PlaneGeometry, ShaderMaterial,
   SRGBColorSpace, Vector3, Quaternion,
 } from 'three';
@@ -39,6 +39,14 @@ varying vec3 vNormal;
 varying vec2 vUv;
 varying float vAo;
 varying vec4 vFacade;
+// Box-filtered 1-D pulse (1 inside [a,b] of a unit cell), width w = fwidth(x).
+float pulse(float a, float b, float x, float w) {
+  float x0 = x - w * 0.5, x1 = x + w * 0.5;
+  float inside = max(0.0, min(x1, b) - max(x0, a));
+  // neighbouring cell's pulse when the footprint crosses the cell edge
+  inside += max(0.0, min(x1, b - 1.0) - max(x0, a - 1.0)) + max(0.0, min(x1, b + 1.0) - max(x0, a + 1.0));
+  return clamp(inside / w, 0.0, 1.0);
+}
 void main() {
   vec3 N = normalize(vNormal);
   vec3 toCam = cameraPosition - vWorld;
@@ -58,8 +66,9 @@ void main() {
     vec2 cell = vUv / cellSize;
     vec2 f = fract(cell);
     vec2 id = floor(cell);
-    vec2 fw = fwidth(cell);
-    float aa = clamp(1.0 - max(fw.x, fw.y) * 1.6, 0.0, 1.0);
+    vec2 fw = max(fwidth(cell), vec2(1e-4));
+    // Fade to the average pattern once a cell is only a few pixels big.
+    float aa = clamp(1.0 - max(fw.x, fw.y) * 1.2, 0.0, 1.0);
     vec3 diffuse = lightDiffuse(N);
     vec3 R = reflect(-V, N);
     float fres = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
@@ -68,21 +77,21 @@ void main() {
     vec3 litCol = mix(vec3(1.0, 0.72, 0.4), vec3(1.0, 0.88, 0.7), fract(litRnd * 13.0)) * 1.3;
     if (glass > 0.5) {
       // Curtain wall: thin mullions, reflective tinted glass.
-      vec2 m = step(vec2(0.06, 0.1), f) * step(f, vec2(0.94, 0.9));
+      vec2 m = vec2(pulse(0.06, 0.94, f.x, fw.x), pulse(0.1, 0.9, f.y, fw.y));
       float pane = mix(0.8, m.x * m.y, aa);
       vec3 tint = mix(vec3(0.1, 0.16, 0.22), vec3(0.18, 0.15, 0.12), hue);
       vec3 glassCol = tint * diffuse * 0.5 + skyReflect(R) * (0.25 + 0.7 * fres);
       vec3 frame = vec3(0.35, 0.36, 0.38) * diffuse;
       col = mix(frame, glassCol, pane);
-      col += litCol * lit * 0.55 * mix(0.3 * 0.8, pane, aa);
+      col += litCol * 0.55 * mix(0.14 * 0.8, lit * pane, aa);
     } else {
       // Concrete / brick with punched windows.
       vec3 wall = mix(vec3(0.62, 0.56, 0.48), vec3(0.55, 0.36, 0.28), hue) * diffuse;
-      vec2 w = step(vec2(0.2, 0.28), f) * step(f, vec2(0.8, 0.86));
-      float win = mix(0.35, w.x * w.y, aa);
+      float w = pulse(0.2, 0.8, f.x, fw.x) * pulse(0.28, 0.86, f.y, fw.y);
+      float win = mix(0.35, w, aa);
       vec3 winCol = vec3(0.05, 0.06, 0.08) + skyReflect(R) * (0.15 + 0.6 * fres);
       col = mix(wall, winCol, win);
-      col += litCol * lit * mix(0.35 * 0.3, w.x * w.y, aa);
+      col += litCol * mix(0.14 * 0.35, lit * w, aa);
     }
   }
   col *= vAo;

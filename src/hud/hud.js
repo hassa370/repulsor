@@ -170,14 +170,16 @@ export class Hud {
       }
     }
     g.textAlign = 'center';
-    g.font = '400 22px system-ui, sans-serif';
+    g.font = '400 18px system-ui, sans-serif';
     g.fillStyle = '#bba';
-    g.fillText('Right stick / arrows: select  ·  A / trigger / Enter: choose', 256, 482);
+    g.fillText('Right stick / arrows: select', 256, 462);
+    g.fillText('A / trigger / Enter: choose  ·  Y / Tab: resume', 256, 486);
     tex.needsUpdate = true;
   }
 
   setMenu(open) {
     this.menu.mesh.visible = open;
+    if (open) { this.msg.mesh.visible = false; this.msgTime = 0; }
     if (open) this.drawMenu();
   }
 

@@ -10,7 +10,7 @@ export const U = {
   uFogDensity: { value: WORLD.fogDensity },
   uSkyTop: { value: new Color(0.1, 0.13, 0.3) },
   uSkyHorizon: { value: new Color(0.9, 0.5, 0.3) },
-  uAmbientSky: { value: new Color(0.32, 0.3, 0.42) },
+  uAmbientSky: { value: new Color(0.27, 0.26, 0.37) },
   uAmbientGround: { value: new Color(0.16, 0.12, 0.1) },
   uTime: { value: 0 },
 };
