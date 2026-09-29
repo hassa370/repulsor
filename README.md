@@ -49,7 +49,19 @@ All bindings live in one object, `BINDINGS` in `src/config.js`.
 | Pause menu (debug overlay lives here) | **Y** | `Tab` / `P` |
 | Menu navigate / choose | Right stick up/down, **A** or right trigger | Arrow keys, `Enter` / click |
 
-Thrust direction follows the head. With a light squeeze (below `FLIGHT.tiltStart`) the thrust points straight up, which gives a stable hover. Squeezing harder tilts the thrust toward where you look: look down to dive, look up to climb. The left stick adds lateral and forward/back thrust.
+Thrust direction follows the head, but smoothed, so glancing around doesn't yank your flight path. The grip has three zones:
+
+- **0–20 %**: gentle descent.
+- **20–45 %**: hover. A wide range of finger pressure holds you steady, and with the stick centred an air brake stops your drift so you can aim.
+- **45–100 %**: more power, and the thrust tilts toward where you look. Look down to dive, look up to climb.
+
+The left stick adds lateral and forward/back thrust.
+
+**Finding and hitting goons**
+- Every goon has a glowing marker above it, drawn through walls.
+- Goons outside your view show as red pips at the edge of your vision, pointing the way.
+- With a finger on a trigger, a laser sight comes out of that hand, and a red lock-on appears on the goon aim assist will hit.
+- Shots bend slightly toward a goon near your aim (`WEAPONS.assistDeg`, `assistRadius`, `homingQuick`, `homingCharged`).
 
 ## Tuning flight
 
@@ -57,8 +69,11 @@ Every constant is in `src/config.js` under `FLIGHT`. The most useful ones:
 
 | Constant | Effect |
 |---|---|
-| `thrustMax` | Acceleration at full grip (m/s²). Hover grip ≈ `gravity / thrustMax` (≈ 0.31 by default). |
-| `tiltStart`, `thrustForwardGain`, `thrustUpBias` | How quickly the thrust vector tilts from "up" toward "look direction" as grip increases. |
+| `thrustMax` | Acceleration at full grip (m/s²). |
+| `hoverLo`, `hoverHi` | The grip range that holds a steady hover (default 0.2–0.45). |
+| `gripSmoothing`, `gripDeadzone`, `lookSmoothing` | Input smoothing. Lower `lookSmoothing` makes the thrust direction calmer when you look around. |
+| `airBrake` | How quickly horizontal drift stops while hovering with the stick centred. |
+| `thrustForwardGain`, `thrustUpBias` | How quickly the thrust vector tilts from "up" toward "look direction" as grip increases. |
 | `dragQuadratic`, `dragLinear` | Natural top speed. The defaults give ≈ 60 m/s at full thrust and ≈ 100 m/s when boosting. |
 | `hoverAssist`, `hoverWindow` | How strongly vertical speed is damped when thrust roughly cancels gravity. |
 | `strafeAccel` | Left-stick authority. |
@@ -67,7 +82,7 @@ Every constant is in `src/config.js` under `FLIGHT`. The most useful ones:
 | `recoilQuick`, `recoilCharged` | Push-back from firing. |
 | `physicsHz`, `maxSubSteps` | Fixed-step rate. |
 
-`npm test` checks the thrust math: pure lift at light grip, a hover point exists, full grip climbs forward, a look-down dive, a drag-limited top speed, roof landings and wall reflection.
+`npm test` checks the thrust math: pure lift at light grip, the hover plateau, full grip climbs forward, a look-down dive, a drag-limited top speed, roof landings and wall reflection.
 
 Enemies, waves and weapons have their own tables in the same file (`ENEMY`, `WEAPONS`, `PLAYER`), as do the city and fog (`WORLD`) and rendering (`RENDER`).
 
@@ -117,7 +132,7 @@ These were measured in headless Chromium with software GL on desktop, which rend
 | Start rooftop, wave 1 | 22–25 | ~105–120k |
 | Worst case: 33 goons alive + 46 debris pieces + ~650 particles, looking over downtown | 35 | ~125k |
 
-In VR, WebGLRenderer draws each eye separately (no multiview in three.js's WebGL path), so the numbers roughly double: about **50–70 draw calls** and **210–250k triangles**. Both are inside the budgets of 100 draw calls and 500k triangles.
+In VR, WebGLRenderer draws each eye separately (no multiview in three.js's WebGL path), so the numbers roughly double. After the city and traffic upgrade, the emulated Quest 3 view measured **58–62 draw calls** and **275–290k triangles**. Both are inside the budgets of 100 draw calls and 500k triangles.
 
 Simulation CPU cost (physics, AI, animation and instance packing, without GL) was about 0.08 ms per frame on wave 1 and about 0.2 ms per frame in the worst case above, both measured on desktop.
 
@@ -143,7 +158,7 @@ src/
   world/sky.js         HDRI or procedural sunset, PMREM, fog colour
   world/city.js        seeded road grid, towers + setbacks, facade shader, props, streetlights
   world/atmosphere.js  water shader, horizon hills, cloud billboards, the two lights
-  enemy/goonModel.js   512px atlas + primitive part geometry (444 tris per goon)
+  enemy/goonModel.js   512px atlas + primitive part geometry (460 tris per goon, baked shading, ember eyes)
   enemy/pose.js        procedural animation -> per-part matrices
   enemy/goonRenderer.js instanced parts, silhouette + sprite LODs, one shared material
   enemy/enemies.js     pool, 20 Hz state machine, leaps/climb/throw/lunge/slam

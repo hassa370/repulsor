@@ -11,10 +11,12 @@ import { PART_NAMES, REGIONS } from './goonModel.js';
 
 const VS = /* glsl */ `
 attribute vec3 aFx; // glow, flash, fade
+attribute float aShade; // baked AO / form shading
 varying vec2 vUv;
 varying vec3 vN;
 varying vec3 vWorld;
 varying vec3 vFx;
+varying float vShade;
 void main() {
   mat4 m = modelMatrix * instanceMatrix;
   vec4 wp = m * vec4(position, 1.0);
@@ -22,6 +24,7 @@ void main() {
   vN = normalize(mat3(m) * normal);
   vUv = uv;
   vFx = aFx;
+  vShade = aShade;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
@@ -32,21 +35,30 @@ varying vec2 vUv;
 varying vec3 vN;
 varying vec3 vWorld;
 varying vec3 vFx;
+varying float vShade;
 void main() {
   if (vFx.z > 0.0 && hash12(gl_FragCoord.xy) < vFx.z) discard; // dithered fade, no sorting
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
+  vec3 V = toCam / dist;
   vec3 N = normalize(vN);
-  vec3 col = texture2D(tAtlas, vUv).rgb * lightDiffuse(N);
-  // rim light so goons read against the bright sky
-  col += uSunColor * 0.12 * pow(1.0 - max(dot(N, toCam / dist), 0.0), 3.0);
+  vec4 t = texture2D(tAtlas, vUv);
+  // Wrapped sun light + hemisphere ambient: soft, readable volumes.
+  float wrap = max(dot(N, uSunDir) * 0.6 + 0.4, 0.0);
+  vec3 light = mix(uAmbientGround, uAmbientSky, N.y * 0.5 + 0.5) * 1.15 + uSunColor * wrap * wrap * 0.95;
+  vec3 col = t.rgb * light * vShade;
+  // Rim light so goons pop against the bright sky and busy facades.
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0);
+  col += (uSunColor * 0.5 + uAmbientSky) * 0.4 * rim;
+  // Emissive ember eyes: atlas alpha < 1 marks glowing pixels.
+  col += vec3(1.0, 0.5, 0.12) * (1.0 - t.a) * (3.0 + 0.8 * sin(uTime * 3.0));
   if (vFx.x > 0.0) {
     // glowing tattoo lines (boss / fire bat)
     float pat = smoothstep(0.93, 1.0, sin(vUv.x * 110.0 + sin(vUv.y * 70.0) * 2.5));
     col += vec3(1.0, 0.42, 0.08) * vFx.x * (0.04 + pat * (1.4 + 0.5 * sin(uTime * 7.0)));
   }
   col = mix(col, vec3(1.0, 0.95, 0.85), vFx.y);
-  col = applyFog(col, dist, -toCam / dist);
+  col = applyFog(col, dist, -V);
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
 }
