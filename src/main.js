@@ -10,7 +10,7 @@ import { Game } from './game.js';
 import { GameAudio } from './audio/audio.js';
 import { buildGoonGeometries, createAtlas } from './enemy/goonModel.js';
 import { loadReferenceImage } from './core/assets.js';
-import { loadHandModels } from './hud/hands.js';
+import { loadHandModels, loadNanoGauntlet } from './hud/hands.js';
 
 const overlay = document.getElementById('overlay');
 const vrBtn = document.getElementById('enter-vr');
@@ -67,7 +67,8 @@ async function init() {
     spriteTexture: ref.spriteTexture,
   };
 
-  const handModels = await loadHandModels();
+  const [skinnedHands, nano] = await Promise.all([loadHandModels(), loadNanoGauntlet()]);
+  const handModels = { ...(skinnedHands || {}), nano };
   const input = new Input(renderer, renderer.domElement);
   const perf = new Perf(renderer);
   const audio = new GameAudio();

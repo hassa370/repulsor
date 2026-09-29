@@ -1,9 +1,9 @@
 import {
-  BufferAttribute, CircleGeometry, Color, CylinderGeometry, Group, Matrix4, Mesh, MeshBasicMaterial,
+  BufferAttribute, BufferGeometry, CircleGeometry, Color, CylinderGeometry, Group, Matrix4, Mesh, MeshBasicMaterial,
   MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 // Iron Man-style gauntlets built on a real skinned hand (WebXR "generic-hand",
 // MIT, see public/models/LICENSE-hands.md):
@@ -205,3 +205,150 @@ export function makeFallbackGauntlet() {
   return { object: g, update() {} };
 }
 
+
+// ---------------------------------------------------------------------------
+// Nano Gauntlet (user-supplied model, decimated to ~18k tris and stored as a
+// compact binary: [nVerts, nIndices] u32, positions f32 (mm), indices u32,
+// part id u16 per vertex). Parts are classified by size/position and painted:
+// red armour, gold hinges + wrist bands, glowing Infinity-Stone gems.
+// Model space: fingers +Y, back of hand +Z, thumb -X (right hand).
+// ---------------------------------------------------------------------------
+
+export const NANO_FIT = { scale: 0.00092, x: 0, y: -0.005, z: 0.02 };
+
+export async function loadNanoGauntlet() {
+  try {
+    const res = await fetch('models/nano-gauntlet.bin');
+    const type = res.headers.get('content-type') || '';
+    if (!res.ok || type.includes('text/html')) return null;
+    const buf = await res.arrayBuffer();
+    const [nv, ni] = new Uint32Array(buf, 0, 2);
+    return {
+      pos: new Float32Array(buf, 8, nv * 3),
+      idx: new Uint32Array(buf, 8 + nv * 12, ni),
+      part: new Uint16Array(buf, 8 + nv * 12 + ni * 4, nv),
+    };
+  } catch {
+    return null;
+  }
+}
+
+const STONE = {
+  space: new Color(0.15, 0.35, 1.0), reality: new Color(1.0, 0.1, 0.12), power: new Color(0.7, 0.2, 1.0),
+  mind: new Color(1.0, 0.85, 0.15), soul: new Color(1.0, 0.5, 0.08), time: new Color(0.15, 1.0, 0.35),
+};
+
+export class NanoGauntlet {
+  constructor(side, data) {
+    this.side = side;
+    this.object = new Group();
+    const { pos, idx, part } = data;
+    const nv = pos.length / 3;
+    // Per-part stats.
+    const stats = new Map();
+    for (let i = 0; i < nv; i++) {
+      const p = part[i];
+      let s = stats.get(p);
+      if (!s) { s = { n: 0, x: 0, y: 0, z: 0 }; stats.set(p, s); }
+      s.n++; s.x += pos[i * 3]; s.y += pos[i * 3 + 1]; s.z += pos[i * 3 + 2];
+    }
+    for (const s of stats.values()) { s.x /= s.n; s.y /= s.n; s.z /= s.n; }
+    // Classify: gems sit on the back of the hand (+Z), small; tiny parts = hinges.
+    const kind = new Map();
+    const knuckles = [];
+    for (const [p, s] of stats) {
+      if (s.n < 24) kind.set(p, 'gold');
+      else if (s.n < 400 && s.z > 5 && s.y > -20) { kind.set(p, 'gem'); knuckles.push([p, s.x]); }
+      else if (s.n < 400 && s.z > 5) kind.set(p, STONE.soul);
+      else if (s.n < 400 && s.x < -40) kind.set(p, STONE.time);
+      else if (s.y < -100) kind.set(p, 'forearm');
+      else kind.set(p, 'red');
+    }
+    knuckles.sort((a, b) => a[1] - b[1]);
+    const order = [STONE.space, STONE.reality, STONE.power, STONE.mind];
+    knuckles.forEach(([p], i) => kind.set(p, order[i % 4]));
+
+    // Split triangles into armour vs gems, colour vertices.
+    const armour = [], armourCol = [], gems = [], gemCol = [];
+    const c = new Color();
+    for (let t = 0; t < idx.length; t += 3) {
+      const k = kind.get(part[idx[t]]);
+      const isGem = k instanceof Color;
+      // one colour per triangle (clean band edges): decide from the centroid
+      const cy = (pos[idx[t] * 3 + 1] + pos[idx[t + 1] * 3 + 1] + pos[idx[t + 2] * 3 + 1]) / 3;
+      if (k === 'gold') c.copy(GOLD);
+      else if (k === 'forearm') c.copy(cy > -62 || (cy < -150 && cy > -165) ? GOLD : RED); // wrist rings + a band
+      else c.copy(RED);
+      for (let v = 0; v < 3; v++) {
+        const i = idx[t + v];
+        const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+        if (isGem) {
+          gems.push(x, y, z); gemCol.push(k.r, k.g, k.b);
+          continue;
+        }
+        armour.push(x, y, z); armourCol.push(c.r, c.g, c.b);
+      }
+    }
+    const mk = (p, col) => {
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(new Float32Array(p), 3));
+      g.setAttribute('color', new BufferAttribute(new Float32Array(col), 3));
+      return toCreasedNormals(g, Math.PI / 5);
+    };
+    const armourMesh = new Mesh(mk(armour, armourCol), new MeshStandardMaterial({
+      vertexColors: true, metalness: 0.88, roughness: 0.28, envMapIntensity: 1.6,
+    }));
+    this.gemMat = new MeshBasicMaterial({ vertexColors: true, toneMapped: false, color: new Color(1.6, 1.6, 1.6) });
+    const gemMesh = new Mesh(mk(gems, gemCol), this.gemMat);
+
+    // Palm centre: middle of the hand shell, on its palm (-Z) surface.
+    let hx = 0, hy = 0, hn = 0, hz = 0;
+    for (let i = 0; i < nv; i++) {
+      const y = pos[i * 3 + 1], x = pos[i * 3];
+      if (y > -30 && y < 50 && x > -45 && x < 70) { hx += x; hy += y; hn++; }
+    }
+    hx /= hn; hy /= hn;
+    hz = Infinity;
+    for (let i = 0; i < nv; i++) {
+      const dx = pos[i * 3] - hx, dy = pos[i * 3 + 1] - hy;
+      if (dx * dx + dy * dy < 400) hz = Math.min(hz, pos[i * 3 + 2]);
+    }
+
+    // model (mm) -> grip space: fingers +Y -> -Z, back +Z -> +X, thumb -X -> +Y.
+    const holder = new Group();
+    holder.add(armourMesh, gemMesh);
+    holder.position.set(-hx, -hy, -hz);
+    const oriented = new Group();
+    oriented.add(holder);
+    oriented.quaternion.setFromRotationMatrix(new Matrix4().set(
+      0, 0, 1, 0,
+      -1, 0, 0, 0,
+      0, -1, 0, 0,
+      0, 0, 0, 1,
+    ));
+    oriented.scale.setScalar(NANO_FIT.scale);
+    oriented.position.set(NANO_FIT.x, NANO_FIT.y, NANO_FIT.z);
+    this.object.add(oriented);
+
+    // Palm repulsor: sits on the palm surface (grip -X for the right hand).
+    this.glowColor = new Color(0xbfe8ff);
+    const ring = new Mesh(new TorusGeometry(0.016, 0.0035, 8, 24),
+      new MeshStandardMaterial({ color: GOLD, metalness: 1, roughness: 0.22, envMapIntensity: 1.6 }));
+    ring.rotation.y = Math.PI / 2;
+    ring.position.set(NANO_FIT.x - 0.003, NANO_FIT.y, NANO_FIT.z + 0.014);
+    const disc = new Mesh(new CircleGeometry(0.0135, 24), new MeshBasicMaterial({ color: this.glowColor, toneMapped: false }));
+    disc.rotation.y = -Math.PI / 2;
+    disc.position.copy(ring.position).x -= 0.001;
+    this.object.add(ring, disc);
+    if (side < 0) this.object.scale.x = -1; // left hand = mirrored right
+    this.t = 0;
+  }
+
+  update(dt, open, glow) {
+    this.t += dt;
+    const gl = 0.35 + glow;
+    this.glowColor.setRGB(0.55 * gl, 0.85 * gl, 1.0 * gl);
+    const pulse = 1.3 + 0.35 * Math.sin(this.t * 3) + glow * 0.3;
+    this.gemMat.color.setRGB(pulse, pulse, pulse);
+  }
+}

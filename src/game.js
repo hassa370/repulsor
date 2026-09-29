@@ -13,7 +13,7 @@ import { Debris } from './enemy/debris.js';
 import { Waves } from './enemy/waves.js';
 import { Weapons } from './weapons/weapons.js';
 import { Hud } from './hud/hud.js';
-import { Gauntlet, makeFallbackGauntlet } from './hud/hands.js';
+import { Gauntlet, NanoGauntlet, makeFallbackGauntlet } from './hud/hands.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -120,8 +120,14 @@ export class Game {
 
     // Gauntlets: on grips in VR, on the fake aim points on desktop.
     // Iron Man gauntlets on a real skinned hand (fallback: simple armour block).
-    this.gauntL = handModels ? new Gauntlet(-1, handModels.left) : makeFallbackGauntlet();
-    this.gauntR = handModels ? new Gauntlet(1, handModels.right) : makeFallbackGauntlet();
+    // Preference: Nano Gauntlet model > armoured skinned hand > simple block.
+    const mkHand = (side) => {
+      if (handModels && handModels.nano) return new NanoGauntlet(side, handModels.nano);
+      if (handModels && handModels.left) return new Gauntlet(side, side < 0 ? handModels.left : handModels.right);
+      return makeFallbackGauntlet();
+    };
+    this.gauntL = mkHand(-1);
+    this.gauntR = mkHand(1);
     this.gauntParentL = null;
     this.gauntParentR = null;
 
