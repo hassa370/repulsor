@@ -10,6 +10,7 @@ A WebXR flying action game for Meta Quest 3. Fly like Iron Man over a procedural
 ## Run
 
 ```bash
+git clone https://github.com/hassa370/repulsor.git
 cd repulsor
 npm install
 npm run dev        # HTTPS dev server on https://<your-LAN-ip>:5173 (self-signed cert)
@@ -30,7 +31,7 @@ npm run preview    # serve dist/ over HTTPS to double-check the build
 `npm run build` writes a fully static `dist/` with relative paths (`base: './'`), so you can host it anywhere:
 
 - **GitHub Pages**: push `dist/` to a `gh-pages` branch, or upload it with the `actions/upload-pages-artifact` action.
-- **Netlify**: drag and drop `dist/`, or set the build command to `npm run build` and the publish directory to `repulsor/dist`.
+- **Netlify**: drag and drop `dist/`, or set the build command to `npm run build` and the publish directory to `dist`.
 
 ## Controls
 
