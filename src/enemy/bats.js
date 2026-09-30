@@ -13,6 +13,7 @@ const _s = new Vector3();
 class Bat {
   constructor() {
     this.active = false;
+    this.asleep = false;
     this.pos = new Vector3();
     this.prevPos = new Vector3();
     this.vel = new Vector3();
@@ -36,7 +37,7 @@ export class Bats {
   spawn(x, y, z, vx, vy, vz, fire, scale) {
     for (let i = 0; i < this.list.length; i++) {
       const b = this.list[i];
-      if (b.active) continue;
+      if (b.active || b.asleep) continue;
       b.active = true;
       b.pos.set(x, y, z);
       b.prevPos.copy(b.pos);
@@ -115,6 +116,14 @@ export class Bats {
   }
 
   clear() {
-    for (let i = 0; i < this.list.length; i++) this.list[i].active = false;
+    for (let i = 0; i < this.list.length; i++) { this.list[i].active = false; this.list[i].asleep = false; }
+  }
+
+  sleep() {
+    for (let i = 0; i < this.list.length; i++) { const b = this.list[i]; if (b.active) { b.active = false; b.asleep = true; } }
+  }
+
+  wake() {
+    for (let i = 0; i < this.list.length; i++) { const b = this.list[i]; if (b.asleep) { b.asleep = false; b.active = true; } }
   }
 }

@@ -68,11 +68,13 @@ export class Decals {
     this.mesh.count = 0;
     this.capacity = capacity;
     this.next = 0;
+    this.enabled = true; // off while the frame isn't anchored to the city (decals live in the city group)
     scene.add(this.mesh);
   }
 
   // Place a hole of the given size at p facing along normal n.
   add(time, px, py, pz, nx, ny, nz, size) {
+    if (!this.enabled) return;
     const i = this.next;
     this.next = (this.next + 1) % this.capacity;
     _e.set(px + nx * 0.05, py + ny * 0.05, pz + nz * 0.05);

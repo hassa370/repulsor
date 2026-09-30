@@ -25,6 +25,7 @@ class Enemy {
   constructor(index) {
     this.index = index;
     this.active = false;
+    this.asleep = false;
     this.boss = false;
     this.scale = 1;
     this.hp = 0;
@@ -75,7 +76,7 @@ export class Enemies {
   // ---------------------------------------------------------------- spawning
   spawn(roof, boss, climber) {
     let e = null;
-    for (let i = 0; i < this.list.length; i++) if (!this.list[i].active) { e = this.list[i]; break; }
+    for (let i = 0; i < this.list.length; i++) if (!this.list[i].active && !this.list[i].asleep) { e = this.list[i]; break; }
     if (!e) return null;
     const g = this.game;
     e.active = true;
@@ -132,8 +133,24 @@ export class Enemies {
   }
 
   clear() {
-    for (let i = 0; i < this.list.length; i++) this.list[i].active = false;
+    for (let i = 0; i < this.list.length; i++) { this.list[i].active = false; this.list[i].asleep = false; }
     this.activeCount = 0;
+  }
+
+  // Simulation LOD beyond the city anchor: goons become metadata only (no AI,
+  // physics, rendering or hit tests) and resume exactly where they were.
+  sleep() {
+    for (let i = 0; i < this.list.length; i++) {
+      const e = this.list[i];
+      if (e.active) { e.active = false; e.asleep = true; this.activeCount--; }
+    }
+  }
+
+  wake() {
+    for (let i = 0; i < this.list.length; i++) {
+      const e = this.list[i];
+      if (e.asleep) { e.asleep = false; e.active = true; e.nextThink = this.game.time + Math.random() / ENEMY.thinkHz; this.activeCount++; }
+    }
   }
 
   // ------------------------------------------------------------------ damage

@@ -10,10 +10,12 @@ const _acc = new Vector3();
 //                          range of finger pressure holds you steady in the air
 //  * hoverHi .. 1        : more power, and the thrust vector tilts toward where
 //                          the head looks (look down = dive, look up = climb)
-export function computeThrust(grip, look, boost, out) {
+// gravityScale / thrustScale come from the altitude regime (1 at the surface);
+// the hover plateau still exactly cancels the (scaled) gravity.
+export function computeThrust(grip, look, boost, out, gravityScale = 1, thrustScale = 1) {
   const g = Math.pow(Math.min(Math.max(grip, 0), 1), FLIGHT.gripCurve);
   if (g <= 0) return out.set(0, 0, 0);
-  const hover = FLIGHT.gravity / FLIGHT.thrustMax;
+  const hover = Math.min(1, (FLIGHT.gravity * gravityScale) / (FLIGHT.thrustMax * thrustScale));
   const lo = FLIGHT.hoverLo, hi = FLIGHT.hoverHi;
   let f, t = 0;
   if (g < lo) f = hover * (g / lo);
@@ -27,7 +29,7 @@ export function computeThrust(grip, look, boost, out) {
   const len = _dir.length();
   if (len < 1e-5) _dir.set(look.x, look.y, look.z); // pure-down dive
   else _dir.multiplyScalar(1 / len);
-  return out.copy(_dir).multiplyScalar(f * FLIGHT.thrustMax * (boost ? FLIGHT.boostMult : 1));
+  return out.copy(_dir).multiplyScalar(f * FLIGHT.thrustMax * thrustScale * (boost ? FLIGHT.boostMult : 1));
 }
 
 // Smash events produced during a step (consumed by the game for FX).
@@ -48,6 +50,10 @@ export class PlayerBody {
     this.eventCount = 0;
     this.smashAge = new Float32Array(4);
     this.smashIn = new Uint8Array(4);
+    // Altitude regime scales (see FlightRegime): thrust x speedScale, quadratic
+    // drag / speedScale (top speed ~ x speedScale), gravity x gravityScale.
+    this.speedScale = 1;
+    this.gravityScale = 1;
   }
 
   reset(x, y, z) {
@@ -73,15 +79,18 @@ export class PlayerBody {
   step(dt, input) {
     this.prevPos.copy(this.pos);
     const v = this.vel;
-    const thrust = input.handMode ? _acc.copy(input.handThrust) : computeThrust(input.grip, input.look, input.boost, _acc);
-    this.thrustAccel = thrust.length();
+    const ss = this.speedScale;
+    const thrust = input.handMode
+      ? _acc.copy(input.handThrust).multiplyScalar(ss)
+      : computeThrust(input.grip, input.look, input.boost, _acc, this.gravityScale, ss);
+    this.thrustAccel = thrust.length() / ss;
     const acc = this.accel.copy(thrust);
-    acc.y -= FLIGHT.gravity;
+    acc.y -= FLIGHT.gravity * this.gravityScale;
 
     const flying = !this.grounded || thrust.y > FLIGHT.gravity * 0.8;
     const sx = input.stickX, sy = input.stickY;
     if (flying) {
-      const s = FLIGHT.strafeAccel * (input.boost ? 1.5 : 1);
+      const s = FLIGHT.strafeAccel * (input.boost ? 1.5 : 1) * ss;
       acc.x += (input.right.x * sx + input.fwd.x * sy) * s;
       acc.z += (input.right.z * sx + input.fwd.z * sy) * s;
     }
@@ -93,18 +102,21 @@ export class PlayerBody {
       v.x -= v.x * k; v.z -= v.z * k;
     }
     // Hover assist: when thrust roughly cancels gravity, bleed off vertical velocity.
-    const netY = acc.y;
+    const netY = acc.y / ss;
     if (input.grip > 0.05 && Math.abs(netY) < FLIGHT.hoverWindow) {
       const k = 1 - Math.abs(netY) / FLIGHT.hoverWindow;
       v.y -= v.y * Math.min(1, FLIGHT.hoverAssist * k * dt);
     }
 
-    // Quadratic + linear drag.
-    let sp = v.length();
-    const drag = FLIGHT.dragQuadratic * sp + FLIGHT.dragLinear;
-    acc.x -= v.x * drag; acc.y -= v.y * drag; acc.z -= v.z * drag;
-
     v.x += acc.x * dt; v.y += acc.y * dt; v.z += acc.z * dt;
+
+    // Quadratic + linear drag, integrated implicitly: unconditionally stable,
+    // so dropping from orbital speed into thick air decelerates hard but can
+    // never reverse the velocity. Same equilibrium (top speed) as explicit.
+    let sp = v.length();
+    const drag = (FLIGHT.dragQuadratic / ss) * sp + FLIGHT.dragLinear;
+    const damp = 1 / (1 + drag * dt);
+    v.x *= damp; v.y *= damp; v.z *= damp;
 
     // Fly where you look: while thrusting in the air, the velocity vector
     // bends toward the head direction (speed is kept, only direction turns).

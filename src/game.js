@@ -1,5 +1,5 @@
 import { Group, Quaternion, Vector3 } from 'three';
-import { ENEMY, FLIGHT, PLAYER, WEAPONS, WORLD } from './config.js';
+import { ENEMY, FLIGHT, ORIGIN, PLAYER, WEAPONS, WORLD, WORLD_BUDGET } from './config.js';
 import { PlayerBody, SMASH_ENTER, SMASH_EXIT, SMASH_GROUND, computeThrust } from './physics/player.js';
 import { Decals } from './fx/decals.js';
 import { Destruction } from './world/destruction.js';
@@ -30,6 +30,10 @@ const _headW = new Vector3();
 const _up = new Vector3();
 const _fxA = new Vector3();
 const _fxB = new Vector3();
+const _cityHead = new Vector3();
+const _q2 = new Quaternion();
+const _q3 = new Quaternion();
+const IDENTITY = new Quaternion();
 const UP = new Vector3(0, 1, 0);
 
 class Flash {
@@ -41,7 +45,7 @@ class Wave3D {
 
 // Owns the player rig, fixed-step simulation and per-frame orchestration.
 export class Game {
-  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels, suitSockets }) {
+  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels, suitSockets, world }) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
@@ -50,6 +54,12 @@ export class Game {
     this.city = city;
     this.perf = perf;
     this.audio = audio;
+    // Seamless world (floating origin, planet, regimes). Optional so the game
+    // still runs standalone (tests / tools).
+    this.world = world || null;
+    this.levelQ = new Quaternion(); // residual view tilt after an origin re-level (decays)
+    this.combatActive = true;
+    this.needPrime = true;
 
     // rig (feet + yaw) -> bank (roll into turns) -> inner -> camera / controllers
     this.rig = new Group();
@@ -115,7 +125,7 @@ export class Game {
     this.decals = new Decals(scene);
     this.destruction = new Destruction(this, city);
     const cap = ENEMY.maxActive;
-    const debrisCap = 110;
+    const debrisCap = WORLD_BUDGET.maxDebris;
     this.goonRenderer = new GoonRenderer(scene, goonAssets.atlas, goonAssets.parts, {
       head: cap + debrisCap, body: cap + debrisCap, armL: cap + debrisCap, armR: cap + debrisCap,
       legL: cap + debrisCap, legR: cap + debrisCap, bat: cap * 2 + debrisCap, silhouette: cap, sprite: cap,
@@ -127,9 +137,9 @@ export class Game {
     this.hud = new Hud(this);
     this.waves = new Waves(this);
     this.flashes = [];
-    for (let i = 0; i < 24; i++) this.flashes.push(new Flash());
+    for (let i = 0; i < WORLD_BUDGET.maxFlashes; i++) this.flashes.push(new Flash());
     this.rings = [];
-    for (let i = 0; i < 4; i++) this.rings.push(new Wave3D());
+    for (let i = 0; i < WORLD_BUDGET.maxExplosions; i++) this.rings.push(new Wave3D());
 
     // Gauntlets: on grips in VR, on the fake aim points on desktop.
     // Iron Man gauntlets on a real skinned hand (fallback: simple armour block).
@@ -145,6 +155,13 @@ export class Game {
     this.gauntParentR = null;
     // Suit rig (boot thruster sockets) in head/controller space.
     this.suit = new SuitRig(this.inner, suitSockets || DEFAULT_SUIT_SOCKETS);
+
+    // Decals (smash holes) belong to the city: they move with its group.
+    if (city.group) city.group.add(this.decals.mesh);
+    if (this.world) {
+      this.world.origin.onShift((fo) => this.onOriginShift(fo));
+      this.world.onAnchorChange((anchored) => this.setCombatActive(anchored));
+    }
 
     this.respawn();
   }
@@ -176,6 +193,9 @@ export class Game {
   }
 
   respawn() {
+    if (this.world) this.world.resetToCity();
+    this.levelQ.identity();
+    this.needPrime = true;
     const s = this.city.startPos;
     this.body.reset(s.x, s.y + 0.05, s.z + 4);
     this.rig.rotation.set(0, this.city.startYaw, 0);
@@ -183,6 +203,9 @@ export class Game {
     this.rig.position.copy(this.body.pos).sub(this.lastOffset);
     this.boostMeter = 1;
   }
+
+  // Altitude above sea level (m) from the planet frame when available.
+  get altitude() { return this.world ? this.world.altitude : this.body.pos.y; }
 
   get headWorld() { return _headW; }
   // Raw head look direction (aiming, culling). Thrust uses a smoothed copy.
@@ -346,6 +369,8 @@ export class Game {
       }
       if (n === FLIGHT.maxSubSteps) this.physAcc = 0;
     }
+    // Floating origin: shift / re-anchor the frame before anything is placed.
+    if (this.world) this.world.afterPhysics(this.body.pos);
     const alpha = this.physAcc / this.step;
     // Interpolated rig placement.
     this.headOffset(_v);
@@ -361,8 +386,56 @@ export class Game {
     this.updatePalmSockets();
     this.weapons.updateAim();
 
+    if (this.world && this.needPrime) {
+      this.needPrime = false;
+      this.world.prime(_headW, this.body.vel, _look);
+    }
     this.renderFrame(dt, alpha);
-    cullChunks(this.city, _headW, WORLD.drawDistance);
+    const w = this.world;
+    cullChunks(this.city, w ? w.toCity(_headW, _cityHead) : _headW, w ? w.cityDrawDistance : WORLD.drawDistance);
+  }
+
+  // ---------------------------------------------------------- floating origin
+  // Every stored local-frame point / direction the game owns moves with the
+  // frame (p -> M p + t). The rig keeps a pure yaw (local-floor must stay
+  // level); any tilt from re-levelling goes into levelQ and eases out.
+  onOriginShift(fo) {
+    const b = this.body;
+    fo.applyPoint(b.pos); fo.applyPoint(b.prevPos);
+    fo.applyDir(b.vel); fo.applyDir(this.prevVel); fo.applyDir(b.accel);
+    fo.applyDir(this.boostDir); fo.applyDir(_thrustLook);
+    if (fo.shiftRotates) {
+      _q2.setFromAxisAngle(UP, this.rig.rotation.y).premultiply(fo.shiftQ); // M * Yaw
+      _v.set(0, 0, -1).applyQuaternion(_q2);
+      const yaw = Math.abs(_v.x) + Math.abs(_v.z) > 1e-6 ? Math.atan2(-_v.x, -_v.z) : this.rig.rotation.y;
+      _q3.setFromAxisAngle(UP, yaw).invert().multiply(_q2); // Yaw'^-1 * M * Yaw
+      this.levelQ.premultiply(_q3).normalize();
+      this.rig.rotation.y = yaw;
+      this.headOffset(this.lastOffset);
+    }
+    b.collision.ignore.fill(-1);
+    this.weapons.shift(fo);
+    this.particles.shift(fo);
+    for (let i = 0; i < this.flashes.length; i++) {
+      const f = this.flashes[i];
+      if (f.life <= 0) continue;
+      _v.set(f.x, f.y, f.z); fo.applyPoint(_v); f.x = _v.x; f.y = _v.y; f.z = _v.z;
+    }
+    for (let i = 0; i < this.rings.length; i++) {
+      const r = this.rings[i];
+      if (r.t >= 1) continue;
+      _v.set(r.x, r.y, r.z); fo.applyPoint(_v); r.x = _v.x; r.y = _v.y; r.z = _v.z;
+    }
+  }
+
+  // Combat (goons, bats, debris, waves, building collapses, decals) only runs
+  // while the frame is anchored to the city; elsewhere it sleeps as metadata.
+  setCombatActive(active) {
+    if (active === this.combatActive) return;
+    this.combatActive = active;
+    if (active) { this.enemies.wake(); this.bats.wake(); this.debris.wake(); }
+    else { this.enemies.sleep(); this.bats.sleep(); this.debris.sleep(); }
+    this.decals.enabled = active;
   }
 
   handleMenu() {
@@ -457,6 +530,10 @@ export class Game {
     si.boost = wantBoost;
     si.stickX = alive ? input.stickX : 0;
     si.stickY = alive ? input.stickY : 0;
+    if (this.world) {
+      this.body.speedScale = this.world.regime.speedScale;
+      this.body.gravityScale = this.world.regime.gravityScale;
+    }
     this.prevVel.copy(this.body.vel);
     this.body.eventCount = 0;
     this.body.step(dt, si);
@@ -478,7 +555,7 @@ export class Game {
     this.enemies.fixed(dt);
     this.bats.fixed(dt);
     this.debris.fixed(dt);
-    if (alive) this.waves.fixed(dt);
+    if (alive && this.combatActive) this.waves.fixed(dt);
 
     // Health regen / death sequence
     this.hurtTimer += dt;
@@ -500,13 +577,15 @@ export class Game {
       target = Math.max(-FLIGHT.bankMax, Math.min(FLIGHT.bankMax, this.latAcc * FLIGHT.bankGain * sp * 0.1)) * speedK;
     }
     this.roll += (target - this.roll) * Math.min(1, dt * 3);
+    // Ease out the re-level tilt left by a floating-origin shift.
+    if (this.levelQ.w < 1 - 1e-12) this.levelQ.slerp(IDENTITY, 1 - Math.exp(-ORIGIN.levelRate * dt));
     // Roll about the view axis through the head so the eyes don't swing.
     const h = this.headLocal;
     _v.set(0, 0, -1).applyQuaternion(this.camera.quaternion);
     _v.y = 0;
     if (_v.lengthSq() < 1e-6) _v.set(0, 0, -1);
     _v.normalize();
-    _q.setFromAxisAngle(_v, this.roll);
+    _q.setFromAxisAngle(_v, this.roll).premultiply(this.levelQ);
     this.bank.quaternion.copy(_q);
     _v2.copy(h).applyQuaternion(_q);
     this.bank.position.set(h.x - _v2.x, h.y - _v2.y, h.z - _v2.z);
@@ -734,7 +813,7 @@ export class Game {
     if (this.state === 'playing') this.renderFlightHud();
     this.renderThrusters();
     this.animateGauntlets(dt);
-    this.destruction.frame(dt);
+    if (this.combatActive) this.destruction.frame(dt);
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       if (f.life <= 0) continue;
@@ -771,7 +850,8 @@ export class Game {
       this.audioTimer = 1 / 15;
       const hm = this.stepInput.handMode;
       const grip = this.state !== 'playing' ? 0 : hm ? Math.max(this.handGrip[0], this.handGrip[1]) : this.input.grip;
-      this.audio.update(_headW, _look, _up, speed, grip, this.stepInput.boost);
+      const air = this.world ? this.world.regime.airDensity : 1;
+      this.audio.update(_headW, _look, _up, speed * air, grip, this.stepInput.boost);
     }
   }
 }

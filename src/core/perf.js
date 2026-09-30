@@ -15,10 +15,16 @@ export class Perf {
     this.downgrades = 0; // after two drops we stay at the fallback rate (no oscillation)
     this.calls = 0;
     this.tris = 0;
+    this.worstMs = 0; // worst frame interval over the last ~2 s
+    this._worstAcc = 0;
+    this._worstT = 0;
   }
 
   frame(dt, cpuMs) {
     this.frameMs += (dt * 1000 - this.frameMs) * 0.05;
+    if (dt * 1000 > this._worstAcc) this._worstAcc = dt * 1000;
+    this._worstT += dt;
+    if (this._worstT >= 2) { this.worstMs = this._worstAcc; this._worstAcc = 0; this._worstT = 0; }
     this.cpuMs += (cpuMs - this.cpuMs) * 0.05;
     this._acc += dt;
     this._frames++;

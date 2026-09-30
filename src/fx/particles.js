@@ -3,6 +3,7 @@ import {
   InstancedBufferGeometry, Mesh, ShaderMaterial,
 } from 'three';
 import { COMMON_GLSL, U } from '../world/shared.js';
+import { WORLD_BUDGET } from '../config.js';
 
 // GPU-simulated ballistic particles. The CPU only writes spawn parameters
 // into a ring buffer; position / spin / fade are evaluated in the vertex
@@ -177,6 +178,21 @@ class GpuParticles {
     if (life > this.maxLife) this.maxLife = life;
   }
 
+  // Floating-origin shift: move spawn points / rotate velocities in place.
+  shift(fo) {
+    const p0 = this.p0, v0 = this.v0;
+    for (let i = 0; i < this.capacity; i++) {
+      const o = i * 4;
+      if (p0[o + 3] < -1e5) continue;
+      const y0 = p0[o + 1];
+      fo.applyPointArray(p0, o);
+      fo.applyDirArray(v0, o);
+      // splinter floor height (w) moves with the frame's vertical offset
+      if (this.floorInW) v0[o + 3] += p0[o + 1] - y0;
+    }
+    this.dirty = true;
+  }
+
   // Approximate number of live particles (for the debug overlay).
   alive(time) {
     let n = 0;
@@ -197,20 +213,27 @@ class GpuParticles {
   }
 }
 
+// Ring-buffer capacities split WORLD_BUDGET.maxParticles; when a burst would
+// exceed a buffer, the oldest particles of that kind are recycled.
+const CAP = WORLD_BUDGET.maxParticles;
+const SPLIT = { splinters: 0.28, chunks: 0.18, sparks: 0.42, smoke: 0.12 };
+
 export class Particles {
   constructor(scene) {
     const box = new BoxGeometry(0.05, 0.05, 0.3);
-    this.splinters = new GpuParticles(box, 600, SPLINTER_VS, SPLINTER_FS, {});
+    this.splinters = new GpuParticles(box, Math.round(CAP * SPLIT.splinters), SPLINTER_VS, SPLINTER_FS, {});
+    this.splinters.floorInW = true;
     // Concrete / glass chunks from smashing through buildings.
-    this.chunks = new GpuParticles(new BoxGeometry(0.32, 0.22, 0.28), 360, SPLINTER_VS, SPLINTER_FS, {});
+    this.chunks = new GpuParticles(new BoxGeometry(0.32, 0.22, 0.28), Math.round(CAP * SPLIT.chunks), SPLINTER_VS, SPLINTER_FS, {});
+    this.chunks.floorInW = true;
     const quad = new InstancedBufferGeometry();
     quad.setAttribute('position', new BufferAttribute(new Float32Array([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0]), 3));
     quad.setIndex([0, 1, 2, 0, 2, 3]);
-    this.sparks = new GpuParticles(quad, 700, SPARK_VS, SPARK_FS, {
+    this.sparks = new GpuParticles(quad, Math.round(CAP * SPLIT.sparks), SPARK_VS, SPARK_FS, {
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
     this.sparks.mesh.renderOrder = 11;
-    this.smoke = new GpuParticles(quad, 260, SMOKE_VS, SMOKE_FS, {
+    this.smoke = new GpuParticles(quad, Math.round(CAP * SPLIT.smoke), SMOKE_VS, SMOKE_FS, {
       transparent: true, depthWrite: false,
     });
     this.smoke.mesh.renderOrder = 8;
@@ -220,6 +243,19 @@ export class Particles {
     scene.add(this.sparks.mesh);
     this.time = 0;
     this._seed = 1;
+    this.spawnScale = 1; // adaptive quality: fraction of requested particles spawned
+  }
+
+  // Burst sizes scaled by quality (at least one particle).
+  n(count) {
+    return count <= 1 ? count : Math.max(1, Math.round(count * this.spawnScale));
+  }
+
+  shift(fo) {
+    this.splinters.shift(fo);
+    this.chunks.shift(fo);
+    this.sparks.shift(fo);
+    this.smoke.shift(fo);
   }
 
   rand() {
@@ -232,6 +268,7 @@ export class Particles {
 
   // Wood splinters burst. dirx/y/z biases the spray (e.g. blast direction).
   woodBurst(x, y, z, dirx, diry, dirz, count, speed, floorY) {
+    count = this.n(count);
     for (let i = 0; i < count; i++) {
       const vx = (this.rand() - 0.5) * speed + dirx * speed * 0.5;
       const vy = this.rand() * speed * 0.8 + diry * speed * 0.3 + 2;
@@ -246,6 +283,7 @@ export class Particles {
 
   // Concrete chunks + glass glints + dust, sprayed along normal n.
   concreteBurst(x, y, z, nx, ny, nz, count, speed) {
+    count = this.n(count);
     for (let i = 0; i < count; i++) {
       const s = speed * (0.3 + this.rand() * 0.7);
       const vx = nx * s + (this.rand() - 0.5) * speed * 0.8;
@@ -270,6 +308,7 @@ export class Particles {
   }
 
   sparkBurst(x, y, z, count, speed, r, g, b, life, gravity = 0.3) {
+    count = this.n(count);
     for (let i = 0; i < count; i++) {
       const ux = this.rand() - 0.5, uy = this.rand() - 0.5, uz = this.rand() - 0.5;
       const s = speed * (0.4 + this.rand() * 0.6) / Math.max(0.1, Math.hypot(ux, uy, uz));
@@ -290,6 +329,6 @@ export class Particles {
   }
 
   aliveCount() {
-    return this.splinters.alive(this.time) + this.chunks.alive(this.time) + this.sparks.alive(this.time);
+    return this.splinters.alive(this.time) + this.chunks.alive(this.time) + this.sparks.alive(this.time) + this.smoke.alive(this.time);
   }
 }

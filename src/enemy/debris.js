@@ -18,6 +18,7 @@ const _cp = new Vector3();
 class Piece {
   constructor() {
     this.active = false;
+    this.asleep = false;
     this.part = 0;
     this.pos = new Vector3();
     this.prevPos = new Vector3();
@@ -44,9 +45,9 @@ export class Debris {
     let p = null;
     for (let k = 0; k < this.pieces.length; k++) {
       const c = this.pieces[(this.next + k) % this.pieces.length];
-      if (!c.active) { p = c; this.next = (this.next + k + 1) % this.pieces.length; break; }
+      if (!c.active && !c.asleep) { p = c; this.next = (this.next + k + 1) % this.pieces.length; break; }
     }
-    if (!p) { p = this.pieces[this.next]; this.next = (this.next + 1) % this.pieces.length; }
+    if (!p) { p = this.pieces[this.next]; this.next = (this.next + 1) % this.pieces.length; p.asleep = false; }
     matrix.decompose(p.pos, p.quat, _s);
     p.prevPos.copy(p.pos);
     p.scale = _s.x;
@@ -103,7 +104,16 @@ export class Debris {
     }
   }
 
+  sleep() {
+    for (let i = 0; i < this.pieces.length; i++) { const p = this.pieces[i]; if (p.active) { p.active = false; p.asleep = true; } }
+    this.activeCount = 0;
+  }
+
+  wake() {
+    for (let i = 0; i < this.pieces.length; i++) { const p = this.pieces[i]; if (p.asleep) { p.asleep = false; p.active = true; } }
+  }
+
   clear() {
-    for (let i = 0; i < this.pieces.length; i++) this.pieces[i].active = false;
+    for (let i = 0; i < this.pieces.length; i++) { this.pieces[i].active = false; this.pieces[i].asleep = false; }
   }
 }

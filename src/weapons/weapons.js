@@ -117,6 +117,17 @@ export class Weapons {
     this.beamGlow = mkBeam(new Vector3(0.15, 0.5, 1.0), 2.5);
   }
 
+  // Floating-origin shift: blasts in flight and the unibeam move with the frame.
+  shift(fo) {
+    for (let i = 0; i < this.blasts.length; i++) {
+      const b = this.blasts[i];
+      if (!b.active) continue;
+      fo.applyPoint(b.pos); fo.applyPoint(b.prevPos); fo.applyDir(b.vel);
+      if (b.target && !b.target.active) b.target = null;
+    }
+    fo.applyPoint(this.beamOrigin); fo.applyDir(this.beamDir);
+  }
+
   clear() {
     for (let i = 0; i < this.blasts.length; i++) this.blasts[i].active = false;
     this.unibeamTime = 0;

@@ -90,8 +90,8 @@ export class Hud {
     this.menuIndex = 0;
 
     // Debug overlay
-    this.debug = panel(512, 256, 0.5, 0.25);
-    this.debug.mesh.position.set(0, -0.32, -1.1);
+    this.debug = panel(512, 512, 0.5, 0.5);
+    this.debug.mesh.position.set(0, -0.2, -1.1);
     this.debug.mesh.rotation.x = 0.35;
     cam.add(this.debug.mesh);
     this.debug.mesh.visible = false;
@@ -193,8 +193,11 @@ export class Hud {
   drawWrist() {
     const game = this.game;
     const b = game.body;
-    const speed = Math.round(b.vel.length() * 3.6);
-    const alt = Math.round(b.pos.y);
+    const vms = b.vel.length();
+    // km/h at flight speeds, km/s once you're going orbital
+    const speed = vms >= 2000 ? Math.round(vms / 100) / 10 : Math.round(vms * 3.6);
+    const altM = game.altitude;
+    const alt = altM >= 10000 ? Math.round(altM / 1000) : Math.round(altM);
     const boost = Math.round(game.boostMeter * 100);
     const hp = Math.round(Math.max(0, game.hp));
     const uni = Math.round(game.weapons.unibeamCd * 10);
@@ -217,12 +220,12 @@ export class Hud {
     g.fillText(sp, 14, 38);
     const spw = g.measureText(sp).width;
     g.font = '500 14px system-ui, sans-serif';
-    g.fillText('KM/H', 14 + spw + 6, 38);
+    g.fillText(vms >= 2000 ? 'KM/S' : 'KM/H', 14 + spw + 6, 38);
     g.textAlign = 'right';
     g.font = '700 30px system-ui, sans-serif';
     g.fillText(`${alt}`, 206, 38);
     g.font = '500 14px system-ui, sans-serif';
-    g.fillText('M ALT', 246, 38);
+    g.fillText(altM >= 10000 ? 'KM ALT' : 'M ALT', 250, 38);
     bar(g, 14, 54, 228, 14, hp / PLAYER.maxHp, hp < 30 ? '#ff5040' : '#6dff8a', 'HP');
     bar(g, 14, 78, 228, 14, boost / 100, '#ffb040', 'BOOST');
     const uniK = 1 - game.weapons.unibeamCd / WEAPONS.unibeamCooldown;
@@ -252,15 +255,27 @@ export class Hud {
     g.textAlign = 'left';
     const lines = [
       `FPS ${p.fps.toFixed(1)} / ${p.targetFps}Hz  frame ${p.frameMs.toFixed(2)}ms`,
-      `CPU ${p.cpuMs.toFixed(2)}ms`,
+      `CPU ${p.cpuMs.toFixed(2)}ms  worst ${p.worstMs.toFixed(1)}ms`,
       `draw calls ${p.calls}  tris ${(p.tris / 1000).toFixed(1)}k`,
       `enemies ${game.enemies.activeCount} (vis ${game.enemies.visibleCount})  debris ${game.debris.activeCount}`,
       `blasts ${game.weapons.activeCount}  particles ${game.particles.aliveCount()}`,
-      `goon instances ${game.goonRenderer.visibleInstances()}  sprites ${game.sprites.count}`,
+      `physics ${1 + game.enemies.activeCount + game.debris.activeCount}  sprites ${game.sprites.count}`,
     ];
+    const w = game.world;
+    if (w) {
+      const c = w.planet.stats, r = w.ranges;
+      const alt = w.altitude;
+      lines.push(
+        `alt ${alt < 10000 ? `${alt.toFixed(0)} m` : `${(alt / 1000).toFixed(1)} km`}  ${w.regime.name}`,
+        `speed x${w.regime.speedScale.toFixed(1)}  g x${w.regime.gravityScale.toFixed(2)}  ${w.anchored ? 'ANCHORED' : 'FLOATING'}`,
+        `chunks ${c.loaded} load  ${c.rendered} draw  ${c.high} high  q ${w.stats.queue}`,
+        `gen ${w.stats.genMs.toFixed(2)}ms  shifts ${w.origin.shiftCount}  Q ${game.quality ? game.quality.name : '-'}`,
+        `sector ${w.global.sx},${w.global.sy},${w.global.sz}  near ${(r.nearF / 1000).toFixed(0)}k far ${(r.farN / 1000).toFixed(1)}-${(r.farF / 1000).toFixed(0)}k`,
+      );
+    }
     for (let i = 0; i < lines.length; i++) {
       if (i > 0) g.fillStyle = '#e0e0e0';
-      g.fillText(lines[i], 14, 34 + i * 38);
+      g.fillText(lines[i], 14, 30 + i * 38);
     }
     tex.needsUpdate = true;
   }

@@ -184,6 +184,111 @@ export const WORLD = {
   drawDistance: 1100,
 };
 
+// ---------------------------------------------------------------------------
+// Seamless world (surface <-> orbit). See src/world/WorldManager.js.
+// ---------------------------------------------------------------------------
+
+// Scaled home planet. The city sits on the planet's "north pole" (+Y), so the
+// city frame (all legacy gameplay coordinates) is the planet-centric frame
+// shifted up by one radius. Real Earth is 6371 km; 500 km keeps travel times
+// sane while the curvature still reads as a planet from the upper atmosphere.
+export const PLANET = {
+  seed: 20260930,
+  radius: 500000, // m
+  atmosphereHeight: 60000, // m: top of the visible atmosphere
+  scaleHeight: 7000, // m: Rayleigh density falloff in the sky shader
+  terrainAmplitude: 2600, // m: continental + mountain relief
+  flatRadius: 2400, // m around the city where the terrain IS the city plane
+  blendRadius: 7000, // m: terrain relaxes from the plane into the planet here
+  cloudBase: 2300, // m: the cloud deck you climb through
+  cloudTop: 2900,
+  cloudCoverage: 0.52, // 0..1 (higher = more cloud)
+  groundHazeHeight: 600, // m: scale height of the thick sunset ground haze
+};
+
+// Floating origin. Inside the anchor bubble the local frame IS the city frame
+// (offset 0, no rotation) so destructible AABB buildings, enemies and every
+// legacy system run unchanged (float32 error there is <= 0.5 mm). Outside it,
+// the origin re-centres on the player every `shiftDistance` metres and
+// re-levels so local +Y is always "up" at the player.
+export const ORIGIN = {
+  anchorRadius: 3000, // m horizontal from the city centre
+  anchorAltitude: 3000, // m above sea level
+  anchorHysteresis: 400, // m: re-anchor only once this far back inside
+  shiftDistance: 1000, // m from the local origin before a shift (floating mode)
+  levelRate: 1.2, // 1/s: how fast the view re-levels after a shift (hides the tilt)
+};
+
+// Altitude regimes (upper bound of each, metres above sea level). Transitions
+// are continuous: these only label the regime and drive blend factors.
+export const REGIMES = {
+  SURFACE: 4000,
+  LOW_ATMOSPHERE: 15000,
+  HIGH_ATMOSPHERE: 60000,
+  ORBIT: 1500000, // beyond: SPACE
+  hysteresis: 0.04, // fractional band so the label doesn't flicker at a boundary
+};
+
+// Contextual flight speed: [altitude m, top-speed multiplier]. Interpolated in
+// log space with smoothstep between keys, then low-passed over time, so there
+// is never an abrupt multiplier. Thrust scales by s and quadratic drag by 1/s,
+// so acceleration time stays ~the same while top speed scales by ~s.
+export const SPEED_CURVE = [
+  [0, 1], [700, 1], [2500, 2.5], [6000, 7], [15000, 22], [35000, 60],
+  [80000, 140], [200000, 320], [1000000, 900], [5000000, 2500],
+];
+export const GRAVITY_CURVE = [ // [altitude m, gravity multiplier]
+  [0, 1], [3000, 1], [20000, 0.85], [60000, 0.35], [150000, 0.04], [400000, 0],
+];
+export const SPEED_SCALE_SMOOTHING = 1.5; // 1/s low-pass on the multiplier
+
+// Cube-sphere quadtree terrain (one BatchedMesh = one draw call per pass).
+export const TERRAIN = {
+  vertsPerSide: 17, // per chunk edge (16 quads) -> 512 tris + skirts
+  maxLevel: 10, // finest level: ~770 m chunks, ~48 m vertex spacing (finest noise octave is 520 m)
+  splitFactor: 1.3, // split while (distance to chunk centre) < splitFactor * chunk size
+  lookaheadSeconds: 1.2, // prefetch around position + velocity * this
+  viewBias: 0.6, // extra split priority for chunks in front of the view
+  skirtFactor: 0.04, // skirt depth as a fraction of chunk size (hides LOD cracks)
+  nearSplit: 2500, // m: chunks nearer than this render in the near depth pass
+};
+
+// Hard performance caps. Every procedural system reads its limit from here.
+export const WORLD_BUDGET = {
+  targetFPS: 90,
+  maxSurfaceChunks: 64, // loaded chunk slots (pool size): never exceeded
+  maxLeafChunks: 48, // chunks selected for display (rest = fallbacks/prefetch)
+  maxHighDetailChunks: 12, // chunks at the two finest levels
+  maxDetailedCityChunks: 16, // merged city chunk meshes (distance culled)
+  maxActiveEnemies: 40, // ENEMY.maxActive (pool size)
+  maxDebris: 60, // ragdoll-lite pieces (pool size)
+  maxPhysicsEntities: 101, // player + enemies + debris capsules
+  maxBlasts: 64, // WEAPONS.maxBlasts
+  maxParticles: 800, // GPU ring buffers (oldest expire first)
+  maxExplosions: 4, // shockwave rings
+  maxFlashes: 24,
+  maxDynamicLights: 2, // 1 directional sun + 1 hemisphere; no FX lights
+  maxStars: 2400,
+  maxCloudLayers: 3,
+  generationBudgetMs: 1.0, // procedural generation time per frame
+};
+
+// Adaptive quality (rolling frame time with hysteresis). Level 0 = HIGH.
+export const QUALITY = {
+  levels: ['HIGH', 'MEDIUM', 'LOW'],
+  degradeAbove: 1.08, // x frame budget, sustained for degradeSeconds
+  degradeSeconds: 3,
+  restoreBelow: 0.8, // x frame budget, sustained for restoreSeconds
+  restoreSeconds: 20,
+  // per level: terrain leaves, high-detail chunks, split factor, cloud layers,
+  // star count, particle spawn scale, city draw distance, foveation
+  presets: [
+    { leaves: 48, high: 12, split: 1.3, clouds: 3, stars: 2400, particles: 1, cityDist: 1100, foveation: 1 },
+    { leaves: 38, high: 8, split: 1.15, clouds: 2, stars: 1600, particles: 0.7, cityDist: 900, foveation: 1 },
+    { leaves: 28, high: 6, split: 1.0, clouds: 1, stars: 1000, particles: 0.45, cityDist: 750, foveation: 1 },
+  ],
+};
+
 export const RENDER = {
   foveation: 1,
   framebufferScale: 1.0,

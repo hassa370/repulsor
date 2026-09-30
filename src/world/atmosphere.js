@@ -1,5 +1,5 @@
 import {
-  BufferAttribute, BufferGeometry, DataTexture, DirectionalLight, HemisphereLight,
+  DataTexture, DirectionalLight, HemisphereLight,
   InstancedBufferAttribute, InstancedBufferGeometry, LinearMipmapLinearFilter, Mesh, NormalBlending,
   PlaneGeometry, RepeatWrapping, RGBAFormat, ShaderMaterial, UnsignedByteType,
 } from 'three';
@@ -39,9 +39,11 @@ function makeWaterNormals(size = 256) {
 
 const waterVS = /* glsl */ `
 varying vec3 vWorld;
+varying vec2 vObj;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
+  vObj = position.xz;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
@@ -49,11 +51,12 @@ const waterFS = /* glsl */ `
 ${COMMON_GLSL}
 uniform sampler2D tNormal;
 varying vec3 vWorld;
+varying vec2 vObj;
 void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
   vec3 V = toCam / dist;
-  vec2 p = vWorld.xz;
+  vec2 p = vObj; // city frame, so the waves don't slide when the origin moves
   vec3 n1 = texture2D(tNormal, p * 0.012 + vec2(uTime * 0.004, uTime * 0.006)).xyz;
   vec3 n2 = texture2D(tNormal, p * 0.037 - vec2(uTime * 0.009, -uTime * 0.005)).xyz;
   vec3 n = (n1 + n2) * 2.0 - 2.0;
@@ -73,73 +76,6 @@ void main() {
 }
 `;
 
-// Horizon hills: low-poly ring, custom shader with capped fog so they read as
-// layered haze silhouettes instead of vanishing.
-const hillsVS = /* glsl */ `
-attribute float aShade;
-varying vec3 vWorld;
-varying float vShade;
-void main() {
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vWorld = wp.xyz;
-  vShade = aShade;
-  gl_Position = projectionMatrix * viewMatrix * wp;
-}
-`;
-const hillsFS = /* glsl */ `
-${COMMON_GLSL}
-varying vec3 vWorld;
-varying float vShade;
-void main() {
-  vec3 toCam = cameraPosition - vWorld;
-  float dist = length(toCam);
-  vec3 col = mix(vec3(0.12, 0.1, 0.14), vec3(0.2, 0.17, 0.16), vShade);
-  vec3 V = -toCam / dist;
-  float s = pow(max(dot(V, uSunDir), 0.0), 6.0);
-  vec3 fc = uFogColor + uSunColor * s * 0.2;
-  float haze = clamp((vWorld.y + 40.0) / 260.0, 0.0, 1.0);
-  col = mix(fc, col, 0.35 + 0.25 * haze);
-  gl_FragColor = vec4(col, 1.0);
-  #include <colorspace_fragment>
-}
-`;
-
-function makeHills() {
-  const seg = 96, rings = [1700, 2000, 2400, 2700];
-  const pos = [], shade = [], idx = [];
-  for (let r = 0; r < rings.length; r++) {
-    for (let s = 0; s <= seg; s++) {
-      const a = (s / seg) * Math.PI * 2;
-      const x = Math.cos(a) * rings[r], z = Math.sin(a) * rings[r];
-      let y;
-      if (r === 0) y = -20;
-      else if (r === rings.length - 1) y = -10;
-      else {
-        const n = fbm(Math.cos(a) * 3 + 10, Math.sin(a) * 3 + r * 4, 4, 11);
-        // Lower hills towards the sun / sea side so the sunset stays open.
-        const seaSide = Math.max(0, -Math.sin(a));
-        y = (40 + n * 260) * (r === 1 ? 0.8 : 1.1) * (1 - 0.7 * seaSide * seaSide);
-      }
-      pos.push(x, y, z);
-      shade.push(r === 1 ? 0.8 : 0.3);
-    }
-  }
-  for (let r = 0; r < rings.length - 1; r++) {
-    for (let s = 0; s < seg; s++) {
-      const a = r * (seg + 1) + s, b = a + 1, c = a + seg + 1, d = c + 1;
-      idx.push(a, c, b, b, c, d);
-    }
-  }
-  const g = new BufferGeometry();
-  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-  g.setAttribute('aShade', new BufferAttribute(new Float32Array(shade), 1));
-  g.setIndex(idx);
-  g.computeBoundingSphere();
-  const m = new Mesh(g, new ShaderMaterial({ uniforms: U, vertexShader: hillsVS, fragmentShader: hillsFS, side: 2 }));
-  m.matrixAutoUpdate = false;
-  return m;
-}
-
 // Soft cloud billboards around 300 m, one instanced draw call.
 const cloudVS = /* glsl */ `
 attribute vec4 aCloud; // xyz centre, size
@@ -152,7 +88,7 @@ void main() {
   vUv = uv;
   vSeed = aSeed;
   vec3 camRight = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
-  vec3 wp = aCloud.xyz + camRight * position.x * aCloud.w + vec3(0.0, 1.0, 0.0) * position.y * aCloud.w * 0.35;
+  vec3 wp = (modelMatrix * vec4(aCloud.xyz, 1.0)).xyz + camRight * position.x * aCloud.w + vec3(0.0, 1.0, 0.0) * position.y * aCloud.w * 0.35;
   vec3 d = wp - cameraPosition;
   vDist = length(d);
   vDir = d / vDist;
@@ -161,6 +97,7 @@ void main() {
 `;
 const cloudFS = /* glsl */ `
 ${COMMON_GLSL}
+uniform float uLowCloudFade;
 varying vec2 vUv;
 varying float vSeed;
 varying float vDist;
@@ -178,6 +115,7 @@ void main() {
   float s = pow(max(dot(vDir, uSunDir), 0.0), 4.0);
   vec3 col = mix(vec3(0.75, 0.45, 0.5), vec3(1.0, 0.65, 0.4), s + (1.0 - vUv.y) * 0.3);
   col = mix(col, uFogColor, clamp(vDist / 2400.0, 0.0, 0.6));
+  a *= uLowCloudFade;
   if (a < 0.01) discard;
   gl_FragColor = vec4(col, a * 0.7);
   #include <colorspace_fragment>
@@ -213,7 +151,10 @@ function makeClouds() {
   return m;
 }
 
-export function buildAtmosphere(scene, sky) {
+// Lights go in the scene; water and the low sunset clouds belong to the city
+// (cityGroup) so they move with it under the floating origin. The old flat
+// horizon hills ring is gone: the streamed planet terrain is the horizon now.
+export function buildAtmosphere(scene, sky, cityGroup = scene) {
   // Lights: exactly one directional + one hemisphere for the whole scene
   // (only three.js built-in materials use them; custom shaders read U).
   const sun = new DirectionalLight(sky.sunColor, WORLD.sunIntensity);
@@ -227,15 +168,14 @@ export function buildAtmosphere(scene, sky) {
   U.uFogColor.value.copy(sky.fogColor).multiplyScalar(0.92);
   U.uSkyHorizon.value.copy(sky.fogColor).multiplyScalar(1.25);
 
+  // Inside the planet's flat zone; the planet ocean continues beyond it.
   const water = new Mesh(
-    new PlaneGeometry(8000, 3000).rotateX(-Math.PI / 2).translate(0, WATER_LEVEL, WORLD.coastZ - 1500 + 20),
+    new PlaneGeometry(3200, 1000).rotateX(-Math.PI / 2).translate(0, WATER_LEVEL, WORLD.coastZ - 500 + 20),
     new ShaderMaterial({ uniforms: { ...U, tNormal: { value: makeWaterNormals() } }, vertexShader: waterVS, fragmentShader: waterFS }),
   );
   water.matrixAutoUpdate = false;
-  scene.add(water);
-  const hills = makeHills();
-  scene.add(hills);
+  cityGroup.add(water);
   const clouds = makeClouds();
-  scene.add(clouds);
-  return { sun, hemi, water, hills, clouds };
+  cityGroup.add(clouds);
+  return { sun, hemi, water, clouds };
 }

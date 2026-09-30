@@ -22,12 +22,14 @@ varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec2 vUv;
 varying float vAo;
+varying float vObjY; // city-frame height (patterns must not move with the floating origin)
 flat varying float vTop; // flat: interpolation noise would flip per-window hashes
 flat varying vec4 vFacade;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
-  vNormal = normal;
+  vNormal = mat3(modelMatrix) * normal;
+  vObjY = position.y;
   vUv = uv;
   vAo = aAo;
   vTop = aTop;
@@ -42,6 +44,7 @@ varying vec3 vWorld;
 varying vec3 vNormal;
 varying vec2 vUv;
 varying float vAo;
+varying float vObjY;
 flat varying float vTop; // flat: interpolation noise would flip per-window hashes
 flat varying vec4 vFacade;
 // Box-filtered 1-D pulse (1 inside [a,b] of a unit cell), width w = fwidth(x).
@@ -81,7 +84,7 @@ void main() {
     vec2 c = floor(vUv * 0.5);
     float n = hash12(c + seed * 91.0);
     col = vec3(0.3, 0.29, 0.28) * (0.8 + 0.3 * n);
-    if (vWorld.y > vTop + 0.5) col = stone * 1.05; // parapet coping
+    if (vObjY > vTop + 0.5) col = stone * 1.05; // parapet coping
     col *= diffuse;
   } else if (h > vTop - 0.01) {
     // Parapet: plain wall with a lit coping line on top.
@@ -162,11 +165,12 @@ uniform vec4 uCity; // minX, minZ, size, pitch
 uniform vec2 uRoad; // road half width, sidewalk half width
 uniform float uCoastZ;
 varying vec3 vWorld;
+varying vec3 vObj;
 float roadLine(float c, float pitch) { float l = mod(c, pitch); return min(l, pitch - l); }
 void main() {
   vec3 toCam = cameraPosition - vWorld;
   float dist = length(toCam);
-  vec2 p = vWorld.xz;
+  vec2 p = vObj.xz; // city frame: roads stay put when the origin moves
   vec2 lp = p - uCity.xy;
   bool inCity = lp.x > -12.0 && lp.y > -12.0 && lp.x < uCity.z + 12.0 && lp.y < uCity.z + 12.0;
   vec3 col;
@@ -202,9 +206,11 @@ void main() {
 
 const worldVS = /* glsl */ `
 varying vec3 vWorld;
+varying vec3 vObj;
 void main() {
   vec4 wp = modelMatrix * vec4(position, 1.0);
   vWorld = wp.xyz;
+  vObj = position;
   gl_Position = projectionMatrix * viewMatrix * wp;
 }
 `;
@@ -456,9 +462,12 @@ export function buildCity(scene, collision) {
   }
 
   // Ground (land) plane.
-  const groundGeo = new PlaneGeometry(4200, 2600 + 1600, 1, 1);
+  // Ground (land) plane: city footprint + margin, all inside the planet's
+  // flat zone (PLANET.flatRadius) so the streamed terrain meets it seamlessly.
+  const gw = 2400, gd = 2360;
+  const groundGeo = new PlaneGeometry(gw, gd, 1, 1);
   groundGeo.rotateX(-Math.PI / 2);
-  groundGeo.translate(0, 0, WORLD.coastZ + (2600 + 1600) / 2);
+  groundGeo.translate(0, 0, WORLD.coastZ + gd / 2);
   const groundMat = new ShaderMaterial({
     uniforms: {
       ...U,
@@ -560,23 +569,130 @@ export function buildCity(scene, collision) {
 
   group.add(buildTraffic(half, pitch, nBlocks));
 
+  // Far LOD: one box per building, one draw call, shown per chunk only where
+  // the detailed chunk mesh is distance-culled.
+  const far = buildFarCity(buildings, chunks, chunkByBuilder);
+  group.add(far.mesh);
+
   scene.add(group);
   const startPos = new Vector3(start.x, start.y, start.z);
   return {
     group, chunks, roofs, startPos, startYaw: 0,
-    buildings, boxBuilding, chunkByBuilder, propMeshes, glows,
+    buildings, boxBuilding, chunkByBuilder, propMeshes, glows, far,
     stats: { buildings: roofs.length, chunks: chunks.length, tris: Math.round(tris), lamps: lamps.length, boxes: collision.boxCount },
   };
 }
 
 // Per-frame chunk distance culling (frustum culling is done by three.js).
 const _cp = new Vector3();
+// camPos is in the city frame. Chunks beyond maxDist swap to the far boxes.
 export function cullChunks(city, camPos, maxDist) {
+  const show = city.far ? city.far.show : null;
   for (let i = 0; i < city.chunks.length; i++) {
     const c = city.chunks[i];
     c.box.clampPoint(camPos, _cp);
     c.mesh.visible = _cp.distanceToSquared(camPos) < maxDist * maxDist;
+    if (show) show[i] = c.mesh.visible ? 0 : 1;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Far city LOD: 5-sided boxes (no floor), 10 tris per building. Heights come
+// from a per-vertex attribute so a collapsed building simply drops to zero.
+// ---------------------------------------------------------------------------
+const farVS = /* glsl */ `
+uniform float uShow[16];
+attribute float aTop;
+attribute float aChunk;
+attribute vec3 aTint;
+varying vec3 vWorld;
+varying vec3 vN;
+varying vec3 vTint;
+varying vec3 vObj;
+void main() {
+  if (uShow[int(aChunk)] < 0.5 || aTop <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vec3 p = vec3(position.x, position.y * aTop, position.z);
+  vObj = p;
+  vec4 wp = modelMatrix * vec4(p, 1.0);
+  vWorld = wp.xyz;
+  vN = mat3(modelMatrix) * normal;
+  vTint = aTint;
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+const farFS = /* glsl */ `
+${COMMON_GLSL}
+varying vec3 vWorld;
+varying vec3 vN;
+varying vec3 vTint;
+varying vec3 vObj;
+void main() {
+  vec3 N = normalize(vN);
+  vec3 toCam = cameraPosition - vWorld;
+  float dist = length(toCam);
+  vec3 col = vTint * lightDiffuse(N);
+  // sparse lit windows so the distant skyline twinkles at dusk
+  float wall = 1.0 - step(0.5, abs(N.y));
+  float w = step(0.86, hash12(floor(vec2(vObj.x + vObj.z, vObj.y) / vec2(3.2, 3.6))));
+  col += vec3(1.0, 0.72, 0.4) * w * wall * 0.5;
+  col = applyFog(col, dist, -toCam / dist);
+  gl_FragColor = vec4(col, 1.0);
+  #include <colorspace_fragment>
+}
+`;
+
+function buildFarCity(buildings, chunks, chunkByBuilder) {
+  const pos = [], nrm = [], top = [], chunk = [], tint = [], idx = [];
+  const chunkIndex = new Map();
+  chunks.forEach((c, i) => chunkIndex.set(c.mesh, i));
+  const rnd = mulberry32(WORLD.seed + 99);
+  const quad = (a, b, c, d, n, t, ci, col) => {
+    const v = pos.length / 3;
+    for (const p of [a, b, c, d]) { pos.push(p[0], p[1], p[2]); nrm.push(n[0], n[1], n[2]); top.push(t); chunk.push(ci); tint.push(col[0], col[1], col[2]); }
+    idx.push(v, v + 1, v + 2, v, v + 2, v + 3);
+  };
+  for (const b of buildings) {
+    const ci = chunkIndex.get(chunkByBuilder[b.builder]) ?? 0;
+    const glass = rnd() < 0.4;
+    const k = 0.85 + rnd() * 0.3;
+    const col = glass ? [0.1 * k, 0.16 * k, 0.22 * k] : [0.5 * k, 0.46 * k, 0.4 * k];
+    const { x0, z0, x1, z1 } = b;
+    b.farStart = pos.length / 3;
+    // walls (y is 0 or 1, scaled by aTop in the shader); CCW seen from outside
+    quad([x1, 0, z1], [x1, 0, z0], [x1, 1, z0], [x1, 1, z1], [1, 0, 0], b.top, ci, col);
+    quad([x0, 0, z0], [x0, 0, z1], [x0, 1, z1], [x0, 1, z0], [-1, 0, 0], b.top, ci, col);
+    quad([x0, 0, z1], [x1, 0, z1], [x1, 1, z1], [x0, 1, z1], [0, 0, 1], b.top, ci, col);
+    quad([x1, 0, z0], [x0, 0, z0], [x0, 1, z0], [x1, 1, z0], [0, 0, -1], b.top, ci, col);
+    quad([x0, 1, z1], [x1, 1, z1], [x1, 1, z0], [x0, 1, z0], [0, 1, 0], b.top, ci, [0.3, 0.29, 0.28]);
+    b.farEnd = pos.length / 3;
+  }
+  const g = new BufferGeometry();
+  g.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
+  g.setAttribute('normal', new BufferAttribute(new Float32Array(nrm), 3));
+  const topAttr = new BufferAttribute(new Float32Array(top), 1);
+  g.setAttribute('aTop', topAttr);
+  g.setAttribute('aChunk', new BufferAttribute(new Float32Array(chunk), 1));
+  g.setAttribute('aTint', new BufferAttribute(new Float32Array(tint), 3));
+  g.setIndex(pos.length / 3 > 65535 ? new BufferAttribute(new Uint32Array(idx), 1) : new BufferAttribute(new Uint16Array(idx), 1));
+  g.computeBoundingSphere();
+  const show = new Array(16).fill(0);
+  const mesh = new Mesh(g, new ShaderMaterial({
+    uniforms: { ...U, uShow: { value: show } }, vertexShader: farVS, fragmentShader: farFS,
+  }));
+  mesh.matrixAutoUpdate = false;
+  mesh.name = 'city-far';
+  return { mesh, show, top: topAttr, tris: idx.length / 3 };
+}
+
+// Collapse / restore a building's far box (called by Destruction).
+export function setFarBuildingHeight(city, b, h) {
+  const far = city.far;
+  if (!far || b.farStart === undefined) return;
+  const a = far.top.array;
+  for (let v = b.farStart; v < b.farEnd; v++) a[v] = h;
+  far.top.clearUpdateRanges();
+  far.top.addUpdateRange(b.farStart, b.farEnd - b.farStart);
+  far.top.needsUpdate = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -609,8 +725,9 @@ void main() {
   float s = aCar.w;
   vCol = s < 0.25 ? vec3(0.75, 0.1, 0.08) : s < 0.5 ? vec3(0.9, 0.9, 0.88) : s < 0.7 ? vec3(0.1, 0.1, 0.12) : s < 0.85 ? vec3(0.15, 0.3, 0.6) : vec3(0.95, 0.75, 0.1);
   vLight = (position.y > 0.55 && position.y < 0.95) ? (normal.x * dir > 0.9 ? 1.0 : (normal.x * dir < -0.9 ? -1.0 : 0.0)) : 0.0;
-  vWorld = wp;
-  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
+  vWorld = (modelMatrix * vec4(wp, 1.0)).xyz;
+  vN = mat3(modelMatrix) * vN;
+  gl_Position = projectionMatrix * viewMatrix * vec4(vWorld, 1.0);
 }
 `;
 const trafficFS = /* glsl */ `

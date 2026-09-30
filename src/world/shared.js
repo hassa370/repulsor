@@ -1,5 +1,5 @@
 import { Color, Vector3 } from 'three';
-import { WORLD } from '../config.js';
+import { PLANET, WORLD } from '../config.js';
 
 // Uniform objects shared (by reference) across every custom shader so the
 // lighting / fog stays consistent and is updated in one place.
@@ -13,6 +13,10 @@ export const U = {
   uAmbientSky: { value: new Color(0.27, 0.26, 0.37) },
   uAmbientGround: { value: new Color(0.16, 0.12, 0.1) },
   uTime: { value: 0 },
+  // Height fog: camera altitude above sea level and the ground-haze scale height.
+  uCamAlt: { value: 0 },
+  uFogHeight: { value: PLANET.groundHazeHeight },
+  uLowCloudFade: { value: 1 }, // the city's low sunset billboards fade out as you climb
 };
 
 export const COMMON_GLSL = /* glsl */ `
@@ -25,6 +29,8 @@ uniform vec3 uSkyHorizon;
 uniform vec3 uAmbientSky;
 uniform vec3 uAmbientGround;
 uniform float uTime;
+uniform float uCamAlt;
+uniform float uFogHeight;
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -44,10 +50,24 @@ vec3 lightDiffuse(vec3 n) {
   vec3 amb = mix(uAmbientGround, uAmbientSky, n.y * 0.5 + 0.5);
   return amb + uSunColor * ndl;
 }
+// Exponential height fog: the haze density falls off with altitude (scale
+// height uFogHeight), integrated analytically along the view ray. At ground
+// level it equals the original exp2 distance fog; from altitude the ground
+// stays visible through a thin haze. viewDir: camera -> fragment (local +Y up).
+float fogFactor(float dist, vec3 viewDir) {
+  float k = 1.0 / uFogHeight;
+  // mean of exp(-h / H) over the ray's altitude span (stable for any length)
+  float h0 = max(uCamAlt, 0.0) * k;
+  float h1 = max(uCamAlt + viewDir.y * dist, 0.0) * k;
+  float dh = h1 - h0;
+  float e0 = exp(-h0);
+  float avg = abs(dh) < 1e-3 ? e0 * (1.0 - 0.5 * dh) : (e0 - exp(-h1)) / dh;
+  float fd = uFogDensity * dist * avg;
+  return clamp(1.0 - exp(-fd * fd), 0.0, 1.0);
+}
 vec3 applyFog(vec3 col, float dist, vec3 viewDir) {
-  float fd = uFogDensity * dist;
-  float f = 1.0 - exp(-fd * fd);
+  float f = fogFactor(dist, viewDir);
   float s = pow(max(dot(viewDir, uSunDir), 0.0), 6.0);
-  return mix(col, uFogColor + uSunColor * s * 0.2, clamp(f, 0.0, 1.0));
+  return mix(col, uFogColor + uSunColor * s * 0.2, f);
 }
 `;

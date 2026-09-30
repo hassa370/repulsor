@@ -28,6 +28,11 @@ export class CollisionWorld {
     this.impactSpeed = 0;
     // Boxes the player is currently smashing through (skipped by collideCapsule).
     this.ignore = new Int32Array(4).fill(-1);
+    // World integration: the terrain height callback (planet surface), and
+    // whether the city's boxes exist (only while the frame is anchored to the
+    // city; far from it there is nothing but terrain to collide with).
+    this.groundFn = null;
+    this.boxesEnabled = true;
   }
 
   isIgnored(i) {
@@ -91,11 +96,13 @@ export class CollisionWorld {
   }
 
   groundHeight(x, z) {
+    if (this.groundFn) return this.groundFn(x, z);
     return z < this.coastZ ? WATER_LEVEL : 0;
   }
 
   // Collect unique boxes overlapping an XZ rectangle into this.result.
   query(minx, minz, maxx, maxz) {
+    if (!this.boxesEnabled) { this.resultCount = 0; return 0; }
     const id = ++this.stampId;
     const cx0 = this._cellRange(minx, this.minX), cx1 = this._cellRange(maxx, this.minX);
     const cz0 = this._cellRange(minz, this.minZ), cz1 = this._cellRange(maxz, this.minZ);
@@ -211,6 +218,7 @@ export class CollisionWorld {
   // Index of a box containing the point, or -1.
   pointInside(x, y, z) {
     if (y < this.groundHeight(x, z)) return -2;
+    if (!this.boxesEnabled) return -1;
     const c = this._cellRange(z, this.minZ) * this.dim + this._cellRange(x, this.minX);
     const b = this.boxes;
     const end = this.cellStart[c + 1];
@@ -228,12 +236,18 @@ export class CollisionWorld {
   raycast(ox, oy, oz, dx, dy, dz, maxDist, skipIgnored = false) {
     let best = maxDist;
     this.hitBox = -1;
-    // ground plane
+    // ground: plane under the origin, refined once at the estimated hit so
+    // rays also land on sloped terrain
     if (dy < -1e-6) {
       const g = this.groundHeight(ox, oz);
-      const t = (g - oy) / dy;
+      let t = (g - oy) / dy;
+      if (this.groundFn && t > 0 && t < best) {
+        const g2 = this.groundHeight(ox + dx * t, oz + dz * t);
+        t = (g2 - oy) / dy;
+      }
       if (t >= 0 && t < best) { best = t; this.hitNormal[0] = 0; this.hitNormal[1] = 1; this.hitNormal[2] = 0; }
     }
+    if (!this.boxesEnabled) return best;
     const id = ++this.stampId;
     const cs = this.cell;
     let cx = Math.floor((ox - this.minX) / cs);

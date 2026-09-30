@@ -1,4 +1,5 @@
 import { Matrix4 } from 'three';
+import { setFarBuildingHeight } from './city.js';
 
 // Destructible buildings. Each building has hit points; fireballs, charged
 // shots, the unibeam and smashing through it wear them down. At zero the
@@ -34,7 +35,8 @@ export class Destruction {
     return true;
   }
 
-  collapse(b) {
+  // quiet: restore a saved ruin (no FX / score, finishes on the next frame).
+  collapse(b, quiet = false) {
     const g = this.game;
     const c = g.collision;
     b.state = 1;
@@ -49,6 +51,7 @@ export class Destruction {
       c.boxes[o + 4] = -1000;
     }
     for (const r of b.roofs) r.dead = true;
+    setFarBuildingHeight(this.city, b, 0);
     // Remember original heights of this building's vertices.
     const mesh = this.city.chunkByBuilder[b.builder];
     b.mesh = mesh;
@@ -72,6 +75,13 @@ export class Destruction {
     for (const gi of b.glows) glows.c[gi * 4 + 3] = 0;
     if (b.glows.length) glows.attrs[2].needsUpdate = true;
     g.decals.hideInBox(b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1);
+    this.destroyed++;
+    if (quiet) {
+      b.t = b.duration;
+      b.quiet = true;
+      this.active.push(b);
+      return;
+    }
     // Rumble + first dust wave.
     const cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2;
     g.audio.play('boom', cx, 5, cz, 1);
@@ -79,7 +89,6 @@ export class Destruction {
     g.shockwave(cx, 0.5, cz, Math.max(b.x1 - b.x0, b.z1 - b.z0) * 1.2);
     g.input.haptic('both', 0.8, 400);
     g.addScore(300);
-    this.destroyed++;
     this.active.push(b);
   }
 
@@ -92,6 +101,7 @@ export class Destruction {
       if (b.state === 0) { b.hp = b.maxHp; continue; }
       b.boxes.forEach((box, k) => { c.boxes[box * 6 + 1] = b.boxY[k * 2]; c.boxes[box * 6 + 4] = b.boxY[k * 2 + 1]; });
       for (const r of b.roofs) r.dead = false;
+      setFarBuildingHeight(this.city, b, b.top);
       if (b.mesh && b.orig) {
         const attr = b.mesh.geometry.attributes.position;
         for (let v = b.vStart; v < b.vEnd; v++) attr.array[v * 3 + 1] = b.orig[v - b.vStart];
@@ -129,6 +139,7 @@ export class Destruction {
         attr.addUpdateRange(b.vStart * 3, (b.vEnd - b.vStart) * 3);
         attr.needsUpdate = true;
       }
+      if (b.quiet) { b.quiet = false; b.state = 2; this.active.splice(i, 1); continue; }
       // Dust boiling out at street level + chunks raining from the falling top.
       const w = b.x1 - b.x0, d = b.z1 - b.z0;
       const topNow = b.top - drop;

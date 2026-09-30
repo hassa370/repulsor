@@ -15,7 +15,9 @@ varying float vLen;
 varying float vCore;
 varying vec4 vColor;
 void main() {
-  vec3 a = aA.xyz, b = aB.xyz;
+  // modelMatrix is identity for the game's batches; the city's static glows
+  // batch rides the city group when the floating origin moves it.
+  vec3 a = (modelMatrix * vec4(aA.xyz, 1.0)).xyz, b = (modelMatrix * vec4(aB.xyz, 1.0)).xyz;
   vec3 mid = (a + b) * 0.5;
   // Never thinner than ~2 px so distant bolts stay visible glows, not hairlines.
   float r = max(aA.w, length(cameraPosition - mid) * 0.0016);
