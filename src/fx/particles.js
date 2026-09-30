@@ -94,6 +94,50 @@ void main() {
 }
 `;
 
+// Billowing dust / smoke: big soft puffs that grow and fade (normal blending).
+const SMOKE_VS = /* glsl */ `
+${COMMON_GLSL}
+attribute vec4 aP0;
+attribute vec4 aV0; // velocity, max size
+attribute vec4 aCol; // rgb, life
+varying vec3 vCol;
+varying vec2 vQ;
+varying float vA;
+varying float vDist;
+void main() {
+  float t = uTime - aP0.w;
+  float life = aCol.w;
+  if (t < 0.0 || t > life) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  float k = t / life;
+  float tt = (1.0 - exp(-1.5 * t)) / 1.5;
+  vec3 p = aP0.xyz + aV0.xyz * tt + vec3(0.0, 0.6, 0.0) * t;
+  vec3 camR = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+  vec3 camU = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+  float size = aV0.w * (0.35 + 0.65 * sqrt(k));
+  p += (camR * position.x + camU * position.y) * size;
+  vQ = position.xy;
+  vCol = aCol.rgb * lightDiffuse(vec3(0.0, 1.0, 0.0));
+  vA = smoothstep(0.0, 0.08, k) * (1.0 - k);
+  vDist = length(p - cameraPosition);
+  gl_Position = projectionMatrix * viewMatrix * vec4(p, 1.0);
+}
+`;
+const SMOKE_FS = /* glsl */ `
+${COMMON_GLSL}
+varying vec3 vCol;
+varying vec2 vQ;
+varying float vA;
+varying float vDist;
+void main() {
+  float d = dot(vQ, vQ);
+  if (d > 1.0) discard;
+  float a = (1.0 - d) * (1.0 - d) * vA * 0.9;
+  vec3 col = applyFog(vCol, vDist, vec3(0.0, 0.0, -1.0));
+  gl_FragColor = vec4(col, a);
+  #include <colorspace_fragment>
+}
+`;
+
 class GpuParticles {
   constructor(baseGeo, capacity, vs, fs, matOpts) {
     const g = new InstancedBufferGeometry();
@@ -166,6 +210,11 @@ export class Particles {
       transparent: true, depthWrite: false, blending: AdditiveBlending,
     });
     this.sparks.mesh.renderOrder = 11;
+    this.smoke = new GpuParticles(quad, 260, SMOKE_VS, SMOKE_FS, {
+      transparent: true, depthWrite: false,
+    });
+    this.smoke.mesh.renderOrder = 8;
+    scene.add(this.smoke.mesh);
     scene.add(this.splinters.mesh);
     scene.add(this.chunks.mesh);
     scene.add(this.sparks.mesh);
@@ -215,6 +264,11 @@ export class Particles {
     }
   }
 
+  // Big soft dust/smoke puff. size = final diameter-ish in metres.
+  puff(x, y, z, vx, vy, vz, size, r, g, b, life) {
+    this.smoke.spawn(this.time, x, y, z, vx, vy, vz, size, r, g, b, life);
+  }
+
   sparkBurst(x, y, z, count, speed, r, g, b, life, gravity = 0.3) {
     for (let i = 0; i < count; i++) {
       const ux = this.rand() - 0.5, uy = this.rand() - 0.5, uz = this.rand() - 0.5;
@@ -231,6 +285,7 @@ export class Particles {
     this.time = time;
     this.splinters.update(time);
     this.chunks.update(time);
+    this.smoke.update(time);
     this.sparks.update(time);
   }
 

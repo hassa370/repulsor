@@ -21,6 +21,21 @@ const THUMB = ['thumb-metacarpal', 'thumb-phalanx-proximal', 'thumb-phalanx-dist
 // Placement of the hand in grip space (tweak if it sits oddly on your controller).
 export const HAND_FIT = { x: 0, y: -0.012, z: 0.045, scale: 1.08 };
 
+// Where the gauntlet sits on the controller's POINTING pose (target-ray space):
+// palm faces where the controller points (-Z), fingers up, forearm angled
+// back toward you. tilt leans the hand forward (radians). The palm sits at the
+// pointing origin so fireballs and thrust exhaust come straight out of it.
+export const HAND_POSE = { x: 0, y: -0.015, z: 0.01, tilt: -0.35 };
+
+// Wrap a hand built in "palm space" (palm -Z, fingers +Y) into the pose group.
+function posed(inner) {
+  const g = new Group();
+  g.add(inner);
+  g.rotation.x = HAND_POSE.tilt;
+  g.position.set(HAND_POSE.x, HAND_POSE.y, HAND_POSE.z);
+  return g;
+}
+
 const RED = new Color(0x9e1414), GOLD = new Color(0xe0a838), GUN = new Color(0x2e2e34), SEAM = new Color(0x120808);
 
 const _m2 = new Matrix4();
@@ -113,6 +128,15 @@ export class Gauntlet {
     }
     this.curl = 0.5;
     this.spread = 0;
+
+    // Old layout (palm -X right / +X left, fingers -Z, thumb +Y) -> palm space
+    // (palm -Z, fingers +Y, thumb -X right / +X left).
+    const inner = new Group();
+    while (this.object.children.length) inner.add(this.object.children[0]);
+    inner.quaternion.setFromRotationMatrix(side > 0
+      ? new Matrix4().set(0, -1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 1)
+      : new Matrix4().set(0, 1, 0, 0, 0, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 1));
+    this.object.add(posed(inner));
   }
 
   // Armour paint from skin weights: which joint dominates each vertex.
@@ -214,7 +238,7 @@ export function makeFallbackGauntlet() {
 // Model space: fingers +Y, back of hand +Z, thumb -X (right hand).
 // ---------------------------------------------------------------------------
 
-export const NANO_FIT = { scale: 0.00092, x: 0, y: -0.005, z: 0.02 };
+export const NANO_FIT = { scale: 0.00092 }; // model is in millimetres
 
 export async function loadNanoGauntlet() {
   try {
@@ -314,32 +338,26 @@ export class NanoGauntlet {
       if (dx * dx + dy * dy < 400) hz = Math.min(hz, pos[i * 3 + 2]);
     }
 
-    // model (mm) -> grip space: fingers +Y -> -Z, back +Z -> +X, thumb -X -> +Y.
+    // Model space already matches palm space: fingers +Y, back +Z, palm -Z, thumb -X.
     const holder = new Group();
     holder.add(armourMesh, gemMesh);
     holder.position.set(-hx, -hy, -hz);
     const oriented = new Group();
     oriented.add(holder);
-    oriented.quaternion.setFromRotationMatrix(new Matrix4().set(
-      0, 0, 1, 0,
-      -1, 0, 0, 0,
-      0, -1, 0, 0,
-      0, 0, 0, 1,
-    ));
     oriented.scale.setScalar(NANO_FIT.scale);
-    oriented.position.set(NANO_FIT.x, NANO_FIT.y, NANO_FIT.z);
-    this.object.add(oriented);
+    const palmSpace = new Group();
+    palmSpace.add(oriented);
 
-    // Palm repulsor: sits on the palm surface (grip -X for the right hand).
+    // Palm repulsor on the palm surface, facing -Z (where shots/thrust come out).
     this.glowColor = new Color(0xbfe8ff);
     const ring = new Mesh(new TorusGeometry(0.016, 0.0035, 8, 24),
       new MeshStandardMaterial({ color: GOLD, metalness: 1, roughness: 0.22, envMapIntensity: 1.6 }));
-    ring.rotation.y = Math.PI / 2;
-    ring.position.set(NANO_FIT.x - 0.003, NANO_FIT.y, NANO_FIT.z + 0.014);
+    ring.position.set(0, 0.004, -0.004);
     const disc = new Mesh(new CircleGeometry(0.0135, 24), new MeshBasicMaterial({ color: this.glowColor, toneMapped: false }));
-    disc.rotation.y = -Math.PI / 2;
-    disc.position.copy(ring.position).x -= 0.001;
-    this.object.add(ring, disc);
+    disc.rotation.y = Math.PI;
+    disc.position.set(0, 0.004, -0.005);
+    palmSpace.add(ring, disc);
+    this.object.add(posed(palmSpace));
     if (side < 0) this.object.scale.x = -1; // left hand = mirrored right
     this.t = 0;
   }

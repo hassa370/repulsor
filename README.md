@@ -49,14 +49,19 @@ All bindings live in one object, `BINDINGS` in `src/config.js`.
 | Pause menu (debug overlay lives here) | **Y** | `Tab` / `P` |
 | Menu navigate / choose | Right stick up/down, **A** or right trigger | Arrow keys, `Enter` / click |
 
-**Flight (VR, default "HANDS" mode).** Each grip is a repulsor in that hand, and the force always points away from your palm:
+**Flight (VR, default "HANDS" mode).** Each controller is a thruster nozzle. Squeeze its **grip** and its repulsor fires out of the palm, along where that controller points, pushing you the opposite way:
 
-- **Hover:** hold your arms down with palms facing the floor and squeeze both grips about a quarter of the way. Squeeze harder to climb.
-- **Go forward:** turn your palms backward.
+- **Lift:** point both hands down.
+- **Fly forward:** point your hands backward, Iron Man style.
+- **Brake / fly backward:** point your hands forward.
 - **Boost in one direction:** squeeze just one hand.
-- **Steer with your eyes:** while thrusting, your flight path bends toward where you look.
+- **Steer with your eyes:** where you look gently bends your flight path (`FLIGHT.gazeSteer`).
 
-A **crosshair** in the centre of your view shows where you're looking. A green **flight-path marker** (a circle with wings) shows where you're actually moving. The pause menu switches to **GAZE** mode (left grip thrusts toward where you look), which is also what desktop uses.
+The gauntlet sits on the controller with its palm facing where the controller points, so the fire from the palm shows exactly where the thrust comes from.
+
+**Fireballs.** Tap a trigger for a fireball, or hold it to grow a big one in your palm and release to throw it. Fireballs leave a trail of embers and smoke and explode on impact. Charged fireballs splash nearby goons and buildings.
+
+**Destructible buildings.** Fireballs, charged fireballs, the unibeam and smashing through all damage the building they hit, leaving scorch holes and debris. Health is `4 + height x 0.1 + footprint / 300`, so a mid-size building takes about 13 quick fireballs or 3 charged ones. At zero health the building collapses into the ground in a dust cloud: goons on its roof fall, and a rubble slab remains. Restarting the game rebuilds the city.
 
 **Smash through buildings (Omni-Man style).** Hit a wall faster than `FLIGHT.smashSpeed` (24 m/s) and you punch straight through:
 

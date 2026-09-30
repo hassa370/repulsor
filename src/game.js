@@ -1,7 +1,8 @@
 import { Group, Quaternion, Vector3 } from 'three';
-import { ENEMY, FLIGHT, PLAYER, WORLD } from './config.js';
+import { ENEMY, FLIGHT, PLAYER, WEAPONS, WORLD } from './config.js';
 import { PlayerBody, SMASH_ENTER, SMASH_EXIT, SMASH_GROUND } from './physics/player.js';
 import { Decals } from './fx/decals.js';
+import { Destruction } from './world/destruction.js';
 import { cullChunks } from './world/city.js';
 import { U } from './world/shared.js';
 import { SpriteBatch } from './fx/sprites.js';
@@ -29,7 +30,7 @@ const _up = new Vector3();
 const UP = new Vector3(0, 1, 0);
 
 class Flash {
-  constructor() { this.x = 0; this.y = 0; this.z = 0; this.r = 0; this.life = 0; this.max = 1; }
+  constructor() { this.x = 0; this.y = 0; this.z = 0; this.r = 0; this.life = 0; this.max = 1; this.cr = 0.5; this.cg = 0.8; this.cb = 1; }
 }
 class Wave3D {
   constructor() { this.x = 0; this.y = 0; this.z = 0; this.r = 0; this.t = 1; }
@@ -101,6 +102,7 @@ export class Game {
     scene.add(this.overlaySprites.mesh);
     this.particles = new Particles(scene);
     this.decals = new Decals(scene);
+    this.destruction = new Destruction(this, city);
     const cap = ENEMY.maxActive;
     const debrisCap = 110;
     this.goonRenderer = new GoonRenderer(scene, goonAssets.atlas, goonAssets.parts, {
@@ -146,6 +148,7 @@ export class Game {
     this.debris.clear();
     this.weapons.clear();
     this.decals.clear();
+    this.destruction.restoreAll();
     this.waves.reset();
     this.hp = PLAYER.maxHp;
     this.score = 0;
@@ -198,7 +201,7 @@ export class Game {
     if (killed) this.audio.playLocal('pickup', 0.25);
   }
 
-  flashAt(x, y, z, r, life) {
+  flashAt(x, y, z, r, life, cr = 0.5, cg = 0.8, cb = 1.0) {
     let best = this.flashes[0];
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
@@ -206,6 +209,7 @@ export class Game {
       if (f.life < best.life) best = f;
     }
     best.x = x; best.y = y; best.z = z; best.r = r; best.life = life; best.max = life;
+    best.cr = cr; best.cg = cg; best.cb = cb;
   }
 
   shockwave(x, y, z, r) {
@@ -256,8 +260,11 @@ export class Game {
   attachGauntlets() {
     const input = this.input;
     // VR only: on desktop the crosshair is enough.
-    const pl = input.xr ? input.gripObject('left') : null;
-    const pr = input.xr ? input.gripObject('right') : null;
+    // Gauntlets ride the pointing pose so the palm repulsor faces where the
+    // controller points (that's where shots and thrust exhaust come out).
+    const il = input.xr ? input.hand('left') : -1, ir = input.xr ? input.hand('right') : -1;
+    const pl = il < 0 ? null : input.controllers[il];
+    const pr = ir < 0 ? null : input.controllers[ir];
     if (pl !== this.gauntParentL) { if (pl) pl.add(this.gauntL.object); else this.gauntL.object.removeFromParent(); this.gauntParentL = pl; }
     if (pr !== this.gauntParentR) { if (pr) pr.add(this.gauntR.object); else this.gauntR.object.removeFromParent(); this.gauntParentR = pr; }
   }
@@ -403,8 +410,8 @@ export class Game {
     this.body.eventCount = 0;
     this.body.step(dt, si);
     for (let k = 0; k < this.body.eventCount; k++) {
-      const e = this.body.events, o = k * 8;
-      this.onSmash(e[o], e[o + 1], e[o + 2], e[o + 3], e[o + 4], e[o + 5], e[o + 6], e[o + 7]);
+      const e = this.body.events, o = k * 9;
+      this.onSmash(e[o], e[o + 1], e[o + 2], e[o + 3], e[o + 4], e[o + 5], e[o + 6], e[o + 7], e[o + 8]);
     }
     const lat = ((this.body.vel.x - this.prevVel.x) * _right.x + (this.body.vel.z - this.prevVel.z) * _right.z) / dt;
     this.latAcc += (lat - this.latAcc) * Math.min(1, dt * 4);
@@ -456,26 +463,40 @@ export class Game {
 
   // World pose of each hand's repulsor: thrust points away from the palm.
   // Grip space +X is the back of the right hand / the palm side of the left.
+  // Each controller is a thruster nozzle: its repulsor fires out of the palm
+  // along where the controller points, so the push is the OPPOSITE way.
+  // Point your hands back -> fly forward; point forward -> brake / go back;
+  // point down -> lift. (FLIGHT.thrustAxis 'palm' keeps the older palm-side axis.)
   updateHandThrusters() {
     const input = this.input;
     for (let h = 0; h < 2; h++) {
-      const grip = input.xr ? input.gripObject(h === 0 ? 'left' : 'right') : null;
-      this.handOk[h] = !!grip;
-      if (!grip) continue;
-      const e = grip.matrixWorld.elements;
-      const s = (h === 0 ? -1 : 1) * FLIGHT.palmSign;
-      this.handDir[h].set(e[0] * s, e[1] * s, e[2] * s).normalize();
+      const name = h === 0 ? 'left' : 'right';
+      const idx = input.xr ? input.hand(name) : -1;
+      const obj = idx < 0 ? null : FLIGHT.thrustAxis === 'palm' ? input.grips[idx] : input.controllers[idx];
+      this.handOk[h] = !!obj;
+      if (!obj) continue;
+      const e = obj.matrixWorld.elements;
+      if (FLIGHT.thrustAxis === 'palm') {
+        const s = (h === 0 ? -1 : 1) * FLIGHT.palmSign;
+        this.handDir[h].set(e[0] * s, e[1] * s, e[2] * s).normalize();
+      } else {
+        this.handDir[h].set(e[8], e[9], e[10]).normalize(); // +Z = opposite of pointing
+      }
       this.handPos[h].set(e[12], e[13], e[14]);
     }
   }
 
   // Omni-Man impacts: punching into / out of a building, or cratering the ground.
-  onSmash(type, x, y, z, nx, ny, nz, speed) {
+  onSmash(type, x, y, z, nx, ny, nz, speed, box) {
     const p = this.particles;
     const k = Math.min(1, speed / 60);
     if (type === SMASH_GROUND) {
       this.shockwave(x, y + 0.2, z, FLIGHT.craterRadius * (0.6 + 0.4 * k));
       p.concreteBurst(x, y + 0.3, z, 0, 1, 0, 40, 14 * (0.6 + k));
+      for (let i = 0; i < 8; i++) {
+        const a = i * 0.785;
+        p.puff(x + Math.cos(a) * 3, y + 1, z + Math.sin(a) * 3, Math.cos(a) * 10, 1.5, Math.sin(a) * 10, 12, 0.5, 0.46, 0.42, 3.5);
+      }
       this.decals.add(this.time, x, y + 0.02, z, 0, 1, 0, 7 + 5 * k);
       // Superhero landing hurts anything nearby.
       const list = this.enemies.list;
@@ -496,13 +517,17 @@ export class Game {
     // Building wall: debris sprays out of the face (entry: back toward us, exit: onward).
     p.concreteBurst(x, y, z, nx, ny, nz, type === SMASH_ENTER ? 45 : 35, 10 + 12 * k);
     p.sparkBurst(x, y, z, 14, 10, 1.0, 0.6, 0.3, 0.5, 0.5);
+    p.puff(x, y, z, nx * 6, 1, nz * 6, 10, 0.5, 0.47, 0.43, 3);
     this.decals.add(this.time, x, y, z, nx, ny, nz, 5 + 3 * k);
     this.flashAt(x, y, z, 3, 0.18);
     this.audio.play('boom', x, y, z, 0.7 + 0.3 * k);
     this.audio.play('crack', x, y, z, 1);
     this.input.haptic('both', 1, 140);
     this.snapPulse = Math.max(this.snapPulse, 0.3);
-    if (type === SMASH_ENTER) this.addScore(25);
+    if (type === SMASH_ENTER) {
+      this.addScore(25);
+      this.destruction.damageBox(box, WEAPONS.buildingDamageSmash);
+    }
   }
 
   // Head-locked crosshair + flight-path marker (where you are actually going).
@@ -569,11 +594,19 @@ export class Game {
       if (!this.handOk[h] || g < 0.03) continue;
       const p = this.handPos[h], d = this.handDir[h];
       const boost = this.stepInput.boost ? 1.6 : 1;
-      const L = (0.25 + 0.9 * g) * boost * (0.85 + 0.15 * Math.sin(this.time * 80 + h));
-      // exhaust leaves opposite to the thrust direction
-      sp.push(p.x - d.x * 0.04, p.y - d.y * 0.04, p.z - d.z * 0.04, p.x - d.x * L, p.y - d.y * L, p.z - d.z * L,
-        0.05 + 0.07 * g, 0.35, 0.7, 1.0, 0.9, 0.55);
-      sp.pushPoint(p.x - d.x * 0.05, p.y - d.y * 0.05, p.z - d.z * 0.05, 0.08 + 0.1 * g, 0.5, 0.8, 1.0, 1, 0.6);
+      // Short cone of fire out of the palm (exhaust leaves opposite to the
+      // thrust): a hot core at the palm and flame blobs shrinking outward.
+      const L = (0.18 + 0.45 * g) * boost;
+      const t = this.time * 30 + h * 5;
+      for (let k = 0; k < 4; k++) {
+        const f = k / 3;
+        const dist = 0.05 + L * f;
+        const r = (0.05 + 0.07 * g) * (1.1 - 0.7 * f) * (0.85 + 0.15 * Math.sin(t + k * 1.7));
+        sp.pushPoint(p.x - d.x * dist, p.y - d.y * dist, p.z - d.z * dist, r,
+          1.0, 0.75 - 0.4 * f, 0.35 - 0.3 * f, (0.95 - 0.5 * f) * Math.min(1, g * 3), k === 0 ? 0.6 : 0.15);
+      }
+      if (Math.random() < g) this.particles.ember(p.x - d.x * 0.1, p.y - d.y * 0.1, p.z - d.z * 0.1,
+        -d.x * 5 + (Math.random() - 0.5), -d.y * 5 + (Math.random() - 0.5), -d.z * 5 + (Math.random() - 0.5), 1.0, 0.5, 0.1, 0.35);
     }
   }
 
@@ -625,11 +658,12 @@ export class Game {
     if (this.state === 'playing') this.renderFlightHud();
     this.renderThrusters();
     this.animateGauntlets(dt);
+    this.destruction.frame(dt);
     for (let i = 0; i < this.flashes.length; i++) {
       const f = this.flashes[i];
       if (f.life <= 0) continue;
       const k = f.life / f.max;
-      sp.pushPoint(f.x, f.y, f.z, f.r * (1.3 - 0.3 * k), 0.5, 0.8, 1.0, k, 0.5);
+      sp.pushPoint(f.x, f.y, f.z, f.r * (1.3 - 0.3 * k), f.cr, f.cg, f.cb, k, 0.5);
     }
     for (let i = 0; i < this.rings.length; i++) {
       const w = this.rings[i];

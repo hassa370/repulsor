@@ -79,6 +79,7 @@ export class Weapons {
     this.activeCount = 0;
     this.unibeamCd = 0;
     this.unibeamTime = 0;
+    this.beamBurn = 0;
     this.beamOrigin = new Vector3();
     this.beamDir = new Vector3();
     this.beamLen = 0;
@@ -237,6 +238,15 @@ export class Weapons {
       }
       b.pos.addScaledVector(b.vel, dt);
       b.life -= dt;
+      // fire trail: embers rising off the fireball, the odd smoke puff
+      const P = g.particles;
+      if (Math.random() < (b.charged ? 1 : 0.6)) {
+        P.ember(b.pos.x, b.pos.y, b.pos.z, (Math.random() - 0.5) * 2, 0.5 + Math.random(), (Math.random() - 0.5) * 2,
+          1.0, 0.35 + Math.random() * 0.3, 0.05, 0.35 + Math.random() * 0.3);
+      }
+      if (Math.random() < (b.charged ? 0.35 : 0.12)) {
+        P.ember(b.prevPos.x, b.prevPos.y, b.prevPos.z, (Math.random() - 0.5), 1.2, (Math.random() - 0.5), 0.12, 0.1, 0.09, 1.4);
+      }
       b.age += dt;
       // bats in flight
       for (let k = 0; k < bats.list.length; k++) {
@@ -262,7 +272,8 @@ export class Weapons {
         continue;
       }
       const inside = c.pointInside(b.pos.x, b.pos.y, b.pos.z);
-      if (inside !== -1 || b.life <= 0) this.explode(b, inside !== -1);
+      if (inside >= 0) this.hitBuilding(b, inside);
+      else if (inside !== -1 || b.life <= 0) this.explode(b, inside !== -1);
     }
     this.activeCount = n;
 
@@ -283,6 +294,15 @@ export class Weapons {
       this.beamDir.copy(look);
       const len = c.raycast(o.x, o.y, o.z, look.x, look.y, look.z, WEAPONS.unibeamRange);
       this.beamLen = len;
+      if (c.hitBox >= 0) {
+        this.beamBurn += dt;
+        if (this.beamBurn > 0.25) {
+          this.beamBurn = 0;
+          g.destruction.damageBox(c.hitBox, WEAPONS.unibeamBuildingDps * 0.25);
+          const n = c.hitNormal;
+          g.decals.add(g.time, o.x + look.x * len, o.y + look.y * len, o.z + look.z * len, n[0], n[1], n[2], 2.5);
+        }
+      }
       // damage everything along the beam
       _v.copy(o).addScaledVector(look, len);
       const R = WEAPONS.unibeamRadius;
@@ -312,14 +332,41 @@ export class Weapons {
     }
   }
 
+  // Fireball into a building: scorch mark on the face, chunks, building damage.
+  hitBuilding(b, box) {
+    const g = this.game;
+    const c = g.collision;
+    _d.copy(b.vel).normalize();
+    const back = b.vel.length() * (1 / 90) + 1;
+    const t = c.raycast(b.pos.x - _d.x * back, b.pos.y - _d.y * back, b.pos.z - _d.z * back, _d.x, _d.y, _d.z, back + 1);
+    const n = c.hitNormal;
+    if (t < back + 1) {
+      b.pos.set(b.pos.x - _d.x * back + _d.x * t, b.pos.y - _d.y * back + _d.y * t, b.pos.z - _d.z * back + _d.z * t);
+      g.decals.add(g.time, b.pos.x, b.pos.y, b.pos.z, n[0], n[1], n[2], b.charged ? 3.5 : 1.6);
+      g.particles.concreteBurst(b.pos.x, b.pos.y, b.pos.z, n[0], n[1], n[2], b.charged ? 16 : 5, b.charged ? 10 : 6);
+    }
+    g.destruction.damageBox(box, b.charged ? WEAPONS.buildingDamageCharged * b.power : WEAPONS.buildingDamageQuick);
+    this.explode(b, true);
+  }
+
   explode(b, impact, enemyHit) {
     const g = this.game;
     b.active = false;
     if (!impact) return;
     const p = b.pos;
     if (b.charged) {
-      g.particles.sparkBurst(p.x, p.y, p.z, 30, 16, 0.5, 0.8, 1.0, 0.8, 0.3);
-      g.flashAt(p.x, p.y, p.z, 4 * b.power, 0.25);
+      // big fire explosion
+      g.particles.sparkBurst(p.x, p.y, p.z, 45, 14, 1.0, 0.45, 0.08, 1.0, -0.1);
+      g.particles.sparkBurst(p.x, p.y, p.z, 20, 7, 1.0, 0.85, 0.4, 0.6, 0);
+      g.particles.puff(p.x, p.y, p.z, 0, 1, 0, 9 * b.power, 0.2, 0.18, 0.16, 2.5);
+      g.particles.puff(p.x, p.y + 1, p.z, 1, 2, -1, 6 * b.power, 0.25, 0.22, 0.2, 3);
+      g.flashAt(p.x, p.y, p.z, 5 * b.power, 0.35, 1.0, 0.55, 0.15);
+      // splash also hurts nearby buildings
+      const nb = g.collision.query(p.x - 4, p.z - 4, p.x + 4, p.z + 4);
+      for (let k = 0; k < nb; k++) {
+        const box = g.collision.result[k];
+        if (g.collision.insideBox(box, p.x, p.y, p.z, 4) && box >= 0) g.destruction.damageBox(box, 1);
+      }
       // splash
       const enemies = g.enemies;
       const R = WEAPONS.chargedSplashRadius * (0.6 + 0.4 * b.power);
@@ -335,8 +382,10 @@ export class Weapons {
       }
       g.audio.play('boom', p.x, p.y, p.z, 0.9);
     } else {
-      g.particles.sparkBurst(p.x, p.y, p.z, 8, 8, 0.5, 0.8, 1.0, 0.4, 0.3);
-      g.flashAt(p.x, p.y, p.z, 1.2, 0.12);
+      g.particles.sparkBurst(p.x, p.y, p.z, 14, 8, 1.0, 0.5, 0.1, 0.55, -0.1);
+      g.particles.puff(p.x, p.y, p.z, 0, 1, 0, 3.5, 0.22, 0.2, 0.18, 1.8);
+      g.flashAt(p.x, p.y, p.z, 1.8, 0.18, 1.0, 0.55, 0.15);
+      g.audio.play('boom', p.x, p.y, p.z, 0.35, 1.6);
     }
   }
 
@@ -348,21 +397,31 @@ export class Weapons {
       const b = this.blasts[i];
       if (!b.active) continue;
       _o.lerpVectors(b.prevPos, b.pos, alpha);
-      // Laser bolt: long white-hot core + coloured halo, streaked along its
-      // motion relative to the shooter.
+      // Fireball: white-yellow core in flickering orange flame, with a tail of
+      // fire blobs fading to red behind it (relative to the shooter's motion).
       _v.copy(b.vel).sub(g.body.vel);
-      const flick = 0.9 + 0.1 * Math.sin(g.time * 90 + i * 7);
-      if (b.charged) {
-        const tl = Math.min(0.05, b.age + 0.01);
-        const tx = _o.x - _v.x * tl, ty = _o.y - _v.y * tl, tz = _o.z - _v.z * tl;
-        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, b.radius * 3.2 * flick, 0.05, 0.35, 1.0, 0.8, 0);
-        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, b.radius * 1.2 * flick, 0.25, 0.65, 1.0, 1, 0.6);
-      } else {
-        const tl = Math.min(0.03, b.age + 0.01);
-        const tx = _o.x - _v.x * tl, ty = _o.y - _v.y * tl, tz = _o.z - _v.z * tl;
-        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, 1.0 * flick, 0.05, 0.35, 1.0, 0.75, 0);
-        sp.push(tx, ty, tz, _o.x, _o.y, _o.z, 0.22 * flick, 0.2, 0.6, 1.0, 1, 0.7);
-        sp.pushPoint(_o.x, _o.y, _o.z, 0.45 * flick, 0.4, 0.75, 1.0, 1, 0.5);
+      const sp2 = _v.length() || 1;
+      const R = b.charged ? b.radius * 1.4 : 0.42;
+      const t = g.time * 25 + i * 3.7;
+      sp.pushPoint(_o.x, _o.y, _o.z, R * (2.6 + 0.4 * Math.sin(t)), 1.0, 0.32, 0.04, 0.55, 0);
+      sp.pushPoint(_o.x, _o.y, _o.z, R * (1.5 + 0.2 * Math.sin(t * 1.7)), 1.0, 0.55, 0.12, 0.95, 0.25);
+      sp.pushPoint(_o.x, _o.y, _o.z, R * 0.75, 1.0, 0.9, 0.6, 1, 0.8);
+      // licking flames around the core
+      for (let k = 0; k < 3; k++) {
+        const a = t * 0.6 + k * 2.1;
+        const jx = Math.sin(a) * R * 0.6, jy = Math.cos(a * 1.3) * R * 0.6, jz = Math.sin(a * 0.7 + k) * R * 0.6;
+        sp.pushPoint(_o.x + jx, _o.y + jy, _o.z + jz, R * 0.9, 1.0, 0.45, 0.06, 0.7, 0.1);
+      }
+      // tail
+      const n = b.charged ? 7 : 5;
+      const spacing = (b.charged ? 0.5 : 0.35) * R / 0.42;
+      const maxTail = Math.min(n, Math.floor(b.age * sp2 / spacing));
+      for (let k = 1; k <= maxTail; k++) {
+        const f = k / (n + 1);
+        const d = k * spacing;
+        const w = Math.sin(t * 0.8 + k) * R * 0.25;
+        sp.pushPoint(_o.x - _v.x / sp2 * d + w, _o.y - _v.y / sp2 * d, _o.z - _v.z / sp2 * d - w,
+          R * (1.5 - f), 1.0, 0.5 - 0.35 * f, 0.08 * (1 - f), 0.8 * (1 - f), 0.1);
       }
     }
     const input = g.input;
@@ -370,12 +429,16 @@ export class Weapons {
       const h = this.hands[i];
       if (h.flash > 0) {
         const k = h.flash / 0.1;
-        sp.pushPoint(h.pos.x + h.dir.x * 0.08, h.pos.y + h.dir.y * 0.08, h.pos.z + h.dir.z * 0.08, 0.12 + 0.18 * k, 0.5, 0.8, 1.0, Math.min(1, k), 0.5);
+        sp.pushPoint(h.pos.x + h.dir.x * 0.08, h.pos.y + h.dir.y * 0.08, h.pos.z + h.dir.z * 0.08, 0.14 + 0.22 * k, 1.0, 0.55, 0.12, Math.min(1, k), 0.5);
       }
       if (h.down && h.held > 0.05) {
         const c = Math.min(1, h.held / WEAPONS.fullChargeTime);
         const pulse = 0.85 + 0.15 * Math.sin(g.time * 30);
-        sp.pushPoint(h.pos.x + h.dir.x * 0.07, h.pos.y + h.dir.y * 0.07, h.pos.z + h.dir.z * 0.07, (0.03 + 0.09 * c) * pulse, 0.4, 0.7, 1.0, 0.6 + 0.4 * c, 0.5);
+        // fireball growing in the palm
+        const cx = h.pos.x + h.dir.x * 0.08, cy = h.pos.y + h.dir.y * 0.08, cz = h.pos.z + h.dir.z * 0.08;
+        sp.pushPoint(cx, cy, cz, (0.05 + 0.16 * c) * pulse, 1.0, 0.35, 0.05, 0.7, 0);
+        sp.pushPoint(cx, cy, cz, (0.03 + 0.08 * c) * pulse, 1.0, 0.8, 0.4, 1, 0.7);
+        if (Math.random() < 0.3 + c) g.particles.ember(cx, cy, cz, (Math.random() - 0.5) * 0.6, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.6, 1.0, 0.45, 0.08, 0.4);
       }
     }
     // Unibeam visual (starts ~1 m ahead of the chest so it never fills the view)
@@ -420,21 +483,17 @@ export class Weapons {
       this.beamCore.visible = false;
       this.beamGlow.visible = false;
     }
-    // Laser sight from each hand (VR, while a finger is on the trigger) with a
-    // dot where it lands, and a lock-on marker on the goon aim assist would hit.
+    // Aim dot where each hand points (VR, finger on the trigger) and a lock-on
+    // marker on the goon aim assist would hit. No beam line before firing.
     const ov = g.overlaySprites;
     if (input.xr) {
       for (let i = 0; i < 2; i++) {
         const h = this.hands[i];
         if (h.value < 0.02) continue;
         const c = g.collision;
-        let dist = Math.min(c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, 400), 400);
+        const dist = Math.min(c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, 400), 400);
         const lock = this.assistTarget(h.pos, h.dir, WEAPONS.quickSpeed, null);
         const k = 0.35 + 0.65 * Math.min(1, h.value / 0.55);
-        const len = Math.min(dist, 120);
-        const cr = i === 0 ? 0.3 : 1.0, cg = i === 0 ? 0.7 : 0.35, cb = i === 0 ? 1.0 : 0.25;
-        sp.push(h.pos.x + h.dir.x * 0.08, h.pos.y + h.dir.y * 0.08, h.pos.z + h.dir.z * 0.08,
-          h.pos.x + h.dir.x * len, h.pos.y + h.dir.y * len, h.pos.z + h.dir.z * len, 0.004, cr, cg, cb, 0.55 * k, 0.6);
         _v.copy(h.dir).multiplyScalar(Math.min(dist, 150)).add(h.pos);
         ov.pushPoint(_v.x, _v.y, _v.z, 0.004 * Math.min(dist, 150) + 0.01, 1.0, 0.9, 0.7, 0.8 * k, 0.5);
         if (lock) {

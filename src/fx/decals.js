@@ -89,6 +89,21 @@ export class Decals {
     this.attr.needsUpdate = true;
   }
 
+  // Hide every decal whose centre lies inside an XZ rectangle (collapsed building).
+  hideInBox(x0, z0, x1, z1) {
+    const m = this.mesh;
+    let changed = false;
+    for (let i = 0; i < m.count; i++) {
+      m.getMatrixAt(i, _m);
+      const x = _m.elements[12], z = _m.elements[14];
+      if (x > x0 && x < x1 && z > z0 && z < z1) {
+        m.setMatrixAt(i, _m.makeScale(0, 0, 0));
+        changed = true;
+      }
+    }
+    if (changed) m.instanceMatrix.needsUpdate = true;
+  }
+
   clear() {
     this.mesh.count = 0;
     this.next = 0;

@@ -41,7 +41,7 @@ export class Waves {
     const p = this.game.body.pos;
     for (let tries = 0; tries < 40; tries++) {
       const r = roofs[Math.floor(Math.random() * roofs.length)];
-      if (r.y < 8 || r.y > maxY || r.hx < minHalf || r.hz < minHalf) continue;
+      if (r.dead || r.y < 8 || r.y > maxY || r.hx < minHalf || r.hz < minHalf) continue;
       const d = Math.hypot(r.x - p.x, r.z - p.z);
       if (d < minD || d > maxD) continue;
       if (this.game.collision.pointInside(r.x, r.y + 1, r.z) !== -1) continue;

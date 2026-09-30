@@ -319,12 +319,23 @@ export function buildCity(scene, collision) {
   const startTarget = new Vector3(0, 0, 230);
   let start = null, startD = Infinity;
 
+  // Destructible buildings: every building remembers its collision boxes, its
+  // contiguous vertex range in its chunk mesh and its rooftop props.
+  const buildings = [];
+  const boxBuilding = new Int32Array(collision.maxBoxes).fill(-1);
   const addBuilding = (x0, z0, x1, z1, height, glass, facSeed) => {
     const fac = [glass ? 1 : 0, facSeed, rnd(), glass ? 3.0 : 2.6 + rnd() * 1.4];
     const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
     const ci = Math.min(nChunks - 1, Math.max(0, Math.floor((cx + half) / cs)));
     const cj = Math.min(nChunks - 1, Math.max(0, Math.floor((cz + half) / cs)));
     const b = builders[cj * nChunks + ci];
+    const bld = {
+      id: buildings.length, builder: cj * nChunks + ci, vStart: b.v, vEnd: b.v, boxes: [], roofs: [],
+      props: [], glows: [], x0, z0, x1, z1, top: height,
+      maxHp: 4 + height * 0.1 + ((x1 - x0) * (z1 - z0)) / 300, hp: 0, state: 0, t: 0, orig: null,
+    };
+    bld.hp = bld.maxHp;
+    buildings.push(bld);
     // Setback tiers for tall towers.
     let tiers = height > 110 ? 3 : height > 60 ? 2 : 1;
     let y = 0, ax0 = x0, az0 = z0, ax1 = x1, az1 = z1;
@@ -333,12 +344,17 @@ export function buildCity(scene, collision) {
       const top = t === tiers - 1 ? height : Math.max(y + 12, Math.round(height * frac / 3.6) * 3.6);
       b.box(ax0, y, az0, ax1, top, az1, fac, t === 0 ? 0.42 : 0.72);
       const box = collision.addBox(ax0, y, az0, ax1, top, az1);
-      roofs.push({ box, x: (ax0 + ax1) / 2, z: (az0 + az1) / 2, y: top, hx: (ax1 - ax0) / 2, hz: (az1 - az0) / 2 });
+      bld.boxes.push(box);
+      boxBuilding[box] = bld.id;
+      const rf = { box, bld: bld.id, dead: false, x: (ax0 + ax1) / 2, z: (az0 + az1) / 2, y: top, hx: (ax1 - ax0) / 2, hz: (az1 - az0) / 2 };
+      roofs.push(rf);
+      bld.roofs.push(rf);
       y = top;
       const ix = Math.min((ax1 - ax0) * 0.15, 6) + 2, iz = Math.min((az1 - az0) * 0.15, 6) + 2;
       if (ax1 - ax0 - ix * 2 < 10 || az1 - az0 - iz * 2 < 10) break;
       ax0 += ix; ax1 -= ix; az0 += iz; az1 -= iz;
     }
+    bld.vEnd = b.v;
     const roof = roofs[roofs.length - 1];
     const d = Math.hypot(roof.x - startTarget.x, roof.z - startTarget.z);
     if (roof.y > 40 && roof.y < 90 && roof.hx > 10 && roof.hz > 10 && d < startD) { startD = d; start = roof; }
@@ -381,11 +397,15 @@ export function buildCity(scene, collision) {
           const nAc = Math.floor(rnd() * 3);
           for (let a = 0; a < nAc; a++) {
             acs.push([roof.x + (rnd() - 0.5) * roof.hx, roof.y, roof.z + (rnd() - 0.5) * roof.hz, rnd() * Math.PI]);
+            buildings[roof.bld].props.push(0, acs.length - 1);
           }
           if (rnd() < 0.15 && roof.y < 70) {
             const tx = roof.x + (rnd() - 0.5) * roof.hx * 0.8, tz = roof.z + (rnd() - 0.5) * roof.hz * 0.8;
             tanks.push([tx, roof.y, tz]);
-            collision.addBox(tx - 2, roof.y, tz - 2, tx + 2, roof.y + 7, tz + 2);
+            const tb = collision.addBox(tx - 2, roof.y, tz - 2, tx + 2, roof.y + 7, tz + 2);
+            buildings[roof.bld].boxes.push(tb);
+            buildings[roof.bld].props.push(1, tanks.length - 1);
+            boxBuilding[tb] = roof.bld;
           }
         }
       }
@@ -395,11 +415,17 @@ export function buildCity(scene, collision) {
   // Tall roofs: helipads and antennas.
   for (const r of roofs) {
     if (r.y < 100) continue;
-    if (rnd() < 0.3 && r.hx > 9 && r.hz > 9) pads.push([r.x, r.y, r.z, Math.min(r.hx, r.hz) * 0.8]);
-    else if (rnd() < 0.5) antennas.push([r.x + (rnd() - 0.5) * r.hx, r.y, r.z + (rnd() - 0.5) * r.hz, 10 + rnd() * 25]);
+    if (rnd() < 0.3 && r.hx > 9 && r.hz > 9) {
+      pads.push([r.x, r.y, r.z, Math.min(r.hx, r.hz) * 0.8]);
+      buildings[r.bld].props.push(2, pads.length - 1);
+    } else if (rnd() < 0.5) {
+      antennas.push([r.x + (rnd() - 0.5) * r.hx, r.y, r.z + (rnd() - 0.5) * r.hz, 10 + rnd() * 25, r.bld]);
+      buildings[r.bld].props.push(3, antennas.length - 1);
+    }
   }
   if (!start) start = roofs[0];
   pads.push([start.x, start.y, start.z, Math.min(start.hx, start.hz, 12) * 0.85]);
+  buildings[start.bld].props.push(2, pads.length - 1);
 
   collision.build();
 
@@ -411,6 +437,7 @@ export function buildCity(scene, collision) {
     fragmentShader: facadeFS,
   });
   const chunks = [];
+  const chunkByBuilder = [];
   let tris = 0;
   for (let j = 0; j < nChunks; j++) {
     for (let i = 0; i < nChunks; i++) {
@@ -424,6 +451,7 @@ export function buildCity(scene, collision) {
       m.name = `chunk_${i}_${j}`;
       group.add(m);
       chunks.push({ mesh: m, box: geo.boundingBox });
+      chunkByBuilder[j * nChunks + i] = m;
     }
   }
 
@@ -448,6 +476,7 @@ export function buildCity(scene, collision) {
 
   // Rooftop props (instanced, lambert, fogged).
   const m4 = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0);
+  const propMeshes = []; // 0 ac, 1 tank, 2 pad, 3 antenna (creation order below)
   const mkInst = (geo, mat, list, fn) => {
     const im = new InstancedMesh(geo, mat, Math.max(1, list.length));
     list.forEach((it, k) => { fn(it); im.setMatrixAt(k, m4.compose(p, q, s)); });
@@ -457,6 +486,7 @@ export function buildCity(scene, collision) {
     im.matrixAutoUpdate = false;
     group.add(im);
     tris += (geo.index ? geo.index.count : geo.attributes.position.count) / 3 * list.length;
+    propMeshes.push(im);
     return im;
   };
   const propMat = new MeshLambertMaterial({ color: 0x8a8580 });
@@ -516,10 +546,14 @@ export function buildCity(scene, collision) {
   }
   for (const r of avi) {
     const y = r.y + 1.4;
+    buildings[r.bld].glows.push(glows.count, glows.count + 1);
     glows.pushPoint(r.x - r.hx + 0.5, y, r.z - r.hz + 0.5, 1.6, 1.0, 0.08, 0.05, 0.9, 0.35);
     glows.pushPoint(r.x + r.hx - 0.5, y, r.z + r.hz - 0.5, 1.6, 1.0, 0.08, 0.05, 0.9, 0.35);
   }
-  for (const a of antennas) glows.pushPoint(a[0], a[1] + a[3], a[2], 2.2, 1.0, 0.1, 0.05, 1, 0.4);
+  for (const a of antennas) {
+    buildings[a[4]].glows.push(glows.count);
+    glows.pushPoint(a[0], a[1] + a[3], a[2], 2.2, 1.0, 0.1, 0.05, 1, 0.4);
+  }
   glows.end();
   glows.mesh.renderOrder = 9;
   group.add(glows.mesh);
@@ -530,6 +564,7 @@ export function buildCity(scene, collision) {
   const startPos = new Vector3(start.x, start.y, start.z);
   return {
     group, chunks, roofs, startPos, startYaw: 0,
+    buildings, boxBuilding, chunkByBuilder, propMeshes, glows,
     stats: { buildings: roofs.length, chunks: chunks.length, tris: Math.round(tris), lamps: lamps.length, boxes: collision.boxCount },
   };
 }

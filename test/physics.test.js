@@ -142,7 +142,7 @@ test('fast impact smashes through the building and out the far side', () => {
   for (let i = 0; i < 90; i++) {
     p.eventCount = 0;
     p.step(1 / 90, input(0.6));
-    for (let k = 0; k < p.eventCount; k++) types.push(p.events[k * 8]);
+    for (let k = 0; k < p.eventCount; k++) types.push(p.events[k * 9]);
   }
   assert.ok(p.pos.x > 30, `x=${p.pos.x}`);
   assert.deepEqual(types.slice(0, 2), [1, 2]);
@@ -156,7 +156,7 @@ test('hard ground landing produces a crater event', () => {
   for (let i = 0; i < 180; i++) {
     p.eventCount = 0;
     p.step(1 / 90, input(0));
-    for (let k = 0; k < p.eventCount; k++) if (p.events[k * 8] === 3) crater = true;
+    for (let k = 0; k < p.eventCount; k++) if (p.events[k * 9] === 3) crater = true;
   }
   assert.ok(crater);
   assert.ok(p.grounded);

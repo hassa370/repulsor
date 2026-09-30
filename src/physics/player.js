@@ -43,8 +43,8 @@ export class PlayerBody {
     this.lastImpact = 0; // m/s of the last impact (read + clear by the game)
     this.accel = new Vector3(); // last applied acceleration (for banking)
     this.thrustAccel = 0;
-    // up to 4 smash events per step: type, x, y, z, nx, ny, nz, speed
-    this.events = new Float32Array(4 * 8);
+    // up to 4 smash events per step: type, x, y, z, nx, ny, nz, speed, box
+    this.events = new Float32Array(4 * 9);
     this.eventCount = 0;
     this.smashAge = new Float32Array(4);
     this.smashIn = new Uint8Array(4);
@@ -61,11 +61,11 @@ export class PlayerBody {
     this.vel.x += x; this.vel.y += y; this.vel.z += z;
   }
 
-  _event(type, x, y, z, nx, ny, nz, sp) {
+  _event(type, x, y, z, nx, ny, nz, sp, box = -1) {
     if (this.eventCount >= 4) return;
-    const e = this.events, o = this.eventCount++ * 8;
+    const e = this.events, o = this.eventCount++ * 9;
     e[o] = type; e[o + 1] = x; e[o + 2] = y; e[o + 3] = z;
-    e[o + 4] = nx; e[o + 5] = ny; e[o + 6] = nz; e[o + 7] = sp;
+    e[o + 4] = nx; e[o + 5] = ny; e[o + 6] = nz; e[o + 7] = sp; e[o + 8] = box;
   }
 
   // input: { grip, boost, look, stickX, stickY, right, fwd,
@@ -139,9 +139,10 @@ export class PlayerBody {
         const n = c.hitNormal;
         const into = -(v.x * n[0] + v.y * n[1] + v.z * n[2]);
         if (into > FLIGHT.smashSpeed) {
-          c.addIgnore(c.hitBox);
+          const hb = c.hitBox;
+          c.addIgnore(hb);
           v.multiplyScalar(FLIGHT.smashKeep);
-          this._event(SMASH_ENTER, this.pos.x + v.x / sp * t, cy + v.y / sp * t, this.pos.z + v.z / sp * t, n[0], n[1], n[2], into);
+          this._event(SMASH_ENTER, this.pos.x + v.x / sp * t, cy + v.y / sp * t, this.pos.z + v.z / sp * t, n[0], n[1], n[2], into, hb);
         }
       }
     }
@@ -171,7 +172,7 @@ export class PlayerBody {
         const px = nx > 0 ? b[o + 3] : nx < 0 ? b[o] : x;
         const pz = nz > 0 ? b[o + 5] : nz < 0 ? b[o + 2] : z;
         const py = ny > 0 ? b[o + 4] : cyNow;
-        this._event(SMASH_EXIT, px, py, pz, nx, ny, nz, v.length());
+        this._event(SMASH_EXIT, px, py, pz, nx, ny, nz, v.length(), i);
         ig[k] = -1;
         this.smashIn[k] = 0;
       }

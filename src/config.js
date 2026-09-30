@@ -49,9 +49,10 @@ export const FLIGHT = {
   // Hand-thruster mode (VR default): each grip fires that hand's repulsor, which
   // pushes you AWAY from the palm (palms down = lift, palms back = forward).
   flightMode: 'hands', // 'hands' | 'gaze' (gaze = left grip thrusts toward where you look)
+  thrustAxis: 'point', // 'point': push opposite to where each controller points; 'palm': opposite the palm side
   handThrustMax: 18, // m/s^2 per hand at full grip (both hands ~3.7 g)
   palmSign: 1, // flip to -1 if thrust comes out of the back of your hands
-  gazeSteer: 1.4, // 1/s: how strongly your flight path bends toward where you look
+  gazeSteer: 0.6, // 1/s: how strongly your flight path bends toward where you look
   // Omni-Man mode: hit a building faster than this and you smash through it.
   smashSpeed: 24, // m/s into the wall
   smashKeep: 0.8, // fraction of speed kept per wall
@@ -107,6 +108,10 @@ export const WEAPONS = {
   unibeamRange: 450,
   unibeamRadius: 1.6,
   unibeamDps: 12,
+  unibeamBuildingDps: 14,
+  buildingDamageQuick: 1, // building hit points: 4 + height*0.1 + footprint/300
+  buildingDamageCharged: 5,
+  buildingDamageSmash: 8,
   maxBlasts: 64,
 };
 
