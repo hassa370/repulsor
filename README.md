@@ -108,9 +108,37 @@ Enemies, waves and weapons have their own tables in the same file (`ENEMY`, `WEA
 | `public/hdri/sunset_1k.hdr` | A 1K CC0 sunset HDRI from [Poly Haven](https://polyhaven.com/hdris) (any sunset works, for example "The Sky is On Fire"). It becomes the background and the precomputed PMREM environment, and the fog colour is sampled from its horizon. Set `WORLD.sunDir` so the sun direction matches the HDRI. | A procedural sunset sky with streaky clouds is painted once at startup. |
 | `public/models/nano-gauntlet.bin` | The Nano Gauntlet model you supplied ("Nano Gauntlet" by DamaskProps), reduced from 1.07M to about 18k triangles and stored in a compact binary. When loaded, parts are painted automatically: red armour, gold hinges and wrist bands, glowing Infinity-Stone gems. A palm repulsor is added, and the left hand is a mirror of the right. Adjust the fit with `NANO_FIT` in `src/hud/hands.js`. Delete the file to fall back to the skinned hands below. | Skinned armoured hands. |
 | `public/models/hand-left.glb`, `hand-right.glb` | Skinned hand models from the WebXR `generic-hand` profile (MIT, see `public/models/LICENSE-hands.md`). They're painted as Iron Man-style gauntlets in code: red plates, gold knuckles, a gunmetal palm, joint seams, a wrist cuff and forearm, and a glowing palm repulsor. Fingers relax at rest and open flat when you thrust or fire. Adjust the fit on the controller with `HAND_FIT` in `src/hud/hands.js`. | A simple armoured block. |
-| `public/textures/enemy_sprite.ktx2` | A pre-compressed far-LOD sprite in KTX2 / Basis with mipmaps. Loaded with `KTX2Loader`; the transcoder is bundled locally. Create it with `toktx --t2 --encode uastc --genmipmap enemy_sprite.ktx2 enemy_sprite.png` | Falls back to the PNG or the painted sprite. |
+| `public/textures/enemy_sprite.ktx2` | A pre-compressed far-LOD sprite in KTX2 / Basis with mipmaps. Loaded with `KTX2Loader`; the transcoder is served from `public/basis/`. Create it with `toktx --t2 --encode uastc --genmipmap enemy_sprite.ktx2 enemy_sprite.png` | Falls back to the PNG or the painted sprite. |
 
 > **Note:** the HDRI and the reference PNG are not in the repo. The environment used to build this could not reach polyhaven.com, and `enemy_face.png` was not present. Drop them into the paths above; no code changes are needed.
+
+## 3D asset pipeline
+
+Raw downloads live in `public/models/source/` (never copied into `dist/`). `npm run assets` turns them into
+small GLBs in `public/models/` and prints a before/after report (also saved as `public/models/assets-report.json`):
+
+| Step | What it does |
+| --- | --- |
+| Clean-up | dedup, weld, prune; drops normal/roughness/AO maps, tangents, unused morph targets |
+| Geometry | meshopt reorder + `EXT_meshopt_compression` |
+| Textures | KTX2 / Basis ETC1S with mipmaps, max 1024 px (512 px for Tung, the AK and cars) |
+| Scale / pivot | metres, pivot centred at the feet (the AK is centred, 0.9 m long) |
+| FBX | the office tower is converted with FBX2glTF (npm `fbx2gltf`) |
+
+Outputs:
+
+| File | Notes |
+| --- | --- |
+| `ironman.glb` | 1.80 m tall, faces +Z, one mesh and one material |
+| `tung.glb` | nodes `lod0` (~3k tris) and `lod1` (~800 tris), 1.80 m tall, faces +Z |
+| `ak47.glb` | skinned, with clips `idle`, `draw`, `reload`, `run`, `shoot` and `walk` |
+| `ak47_static.glb` | bind pose baked, with the spare magazine and casings removed (for instancing) |
+| `cars/<type>.glb` | 10 types; body, wheels, glass and lights merged into one mesh with one 512 px atlas material. Nodes `lod0`/`lod1` (~25%). Faces -Z; `scene.extras.size` = w, h, l |
+| `office.glb` | 9 storeys; frame, interior and glass materials; ~630k tris of chairs dropped. `scene.extras.levels` holds the floor heights, and the glass faces +Z |
+
+At runtime, `src/core/gltf.js` loads them with `GLTFLoader` + `MeshoptDecoder` + `KTX2Loader`. The Basis
+transcoder is in `public/basis/`. To inspect any output (size, tris, draws, texture MB, clips), run
+`npm run dev` and open `/viewer.html`; it works in the Quest browser too. `npm test` checks the budgets.
 
 ## Performance
 

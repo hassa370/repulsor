@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Repulsor asset viewer</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #1b1d22; color: #dde; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+    #ui { position: fixed; left: 8px; top: 8px; background: #0009; padding: 8px 10px; border-radius: 6px; max-width: 360px; }
+    select, button { font: inherit; }
+    #stats { white-space: pre; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <!-- Dev-only: `npm run dev`, then open /viewer.html to inspect the optimized GLBs. -->
+  <div id="ui">
+    <select id="pick"></select>
+    <button id="spin">spin</button>
+    <div id="stats"></div>
+  </div>
+  <script type="module">
+    import {
+      AmbientLight, AnimationMixer, AxesHelper, Box3, Clock, DirectionalLight, GridHelper, PerspectiveCamera,
+      Scene, SRGBColorSpace, Vector3, WebGLRenderer, ACESFilmicToneMapping,
+    } from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+    import { loadGLB, sceneStats } from './src/core/gltf.js';
+
+    const FILES = ['ironman.glb', 'tung.glb', 'ak47.glb', 'ak47_static.glb', 'office.glb',
+      ...['compact', 'coupe', 'hatchback', 'minivan', 'offroad', 'pickup', 'sedan', 'sport', 'suv', 'wagon'].map((c) => `cars/${c}.glb`)];
+
+    const renderer = new WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = SRGBColorSpace;
+    renderer.toneMapping = ACESFilmicToneMapping;
+    document.body.appendChild(renderer.domElement);
+    const scene = new Scene();
+    const camera = new PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 2000);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    scene.add(new AmbientLight(0xffffff, 1.2));
+    const sun = new DirectionalLight(0xffffff, 2.5); sun.position.set(3, 5, 4); scene.add(sun);
+    scene.add(new GridHelper(20, 20, 0x556, 0x334));
+    scene.add(new AxesHelper(1)); // red +X, green +Y, blue +Z (cars face -Z, characters face +Z)
+
+    const pick = document.getElementById('pick');
+    const statsEl = document.getElementById('stats');
+    for (const f of FILES) pick.add(new Option(f, f));
+    let current = null, mixer = null, spin = false;
+    const clock = new Clock();
+    document.getElementById('spin').onclick = () => { spin = !spin; };
+
+    async function show(file, lod = 'lod0') {
+      if (current) scene.remove(current);
+      mixer = null;
+      const gltf = await loadGLB(renderer, `models/${file}`);
+      if (!gltf) { statsEl.textContent = 'missing — run npm run assets'; return; }
+      current = gltf.scene;
+      // Show a single LOD at a time when the file has lod0/lod1 nodes.
+      const lods = current.children.filter((c) => /^lod\d$/.test(c.name));
+      for (const c of lods) c.visible = c.name === lod;
+      scene.add(current);
+      if (gltf.animations.length) {
+        mixer = new AnimationMixer(current);
+        mixer.clipAction(gltf.animations.find((a) => a.name === 'shoot') || gltf.animations[0]).play();
+      }
+      const box = new Box3().setFromObject(current);
+      const size = box.getSize(new Vector3());
+      const r = Math.max(size.x, size.y, size.z);
+      controls.target.copy(box.getCenter(new Vector3()));
+      camera.position.copy(controls.target).add(new Vector3(r * 0.9, r * 0.5, r * 1.3));
+      camera.near = r / 200; camera.far = r * 20; camera.updateProjectionMatrix();
+      const st = sceneStats(current);
+      statsEl.textContent = `${file}\nsize ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)} m\n`
+        + `tris ${st.tris} (all LODs)  draws ${st.draws}  tex ${st.texMB.toFixed(2)} MB\n`
+        + `clips: ${gltf.animations.map((a) => a.name).join(', ') || '-'}\n`
+        + `extras: ${JSON.stringify(current.userData)}`;
+      window.ready = true;
+    }
+    window.show = show;
+    window.view = (x, y, z) => { camera.position.copy(controls.target).add(new Vector3(x, y, z)); };
+    pick.onchange = () => show(pick.value);
+    renderer.setAnimationLoop(() => {
+      const dt = clock.getDelta();
+      mixer?.update(dt);
+      if (spin && current) current.rotation.y += dt * 0.6;
+      controls.update();
+      renderer.render(scene, camera);
+    });
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight);
+    });
+    show(new URLSearchParams(location.search).get('f') || FILES[0]);
+  </script>
+</body>
+</html>

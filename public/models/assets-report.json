@@ -1,0 +1,229 @@
+[
+  {
+    "name": "ironman.glb",
+    "before": {
+      "tris": 12249,
+      "draws": 1,
+      "texGpuMB": 21.333333333333332,
+      "texFileMB": 2.2260303497314453,
+      "fileMB": 2.6269149780273438
+    },
+    "after": {
+      "tris": 12249,
+      "draws": 1,
+      "texGpuMB": 1.3333333333333333,
+      "texFileMB": 0.2381134033203125,
+      "fileMB": 0.43770599365234375
+    },
+    "note": "1.80 m tall, feet pivot"
+  },
+  {
+    "name": "tung.glb",
+    "before": {
+      "tris": 8316,
+      "draws": 1,
+      "texGpuMB": 85.33333333333333,
+      "texFileMB": 5.793614387512207,
+      "fileMB": 6.102069854736328
+    },
+    "after": {
+      "tris": 3000,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.049141883850097656,
+      "fileMB": 0.1154327392578125
+    },
+    "note": "1.80 m, LOD1 800 tris"
+  },
+  {
+    "name": "ak47.glb",
+    "before": {
+      "tris": 3352,
+      "draws": 1,
+      "texGpuMB": 64,
+      "texFileMB": 8.711816787719727,
+      "fileMB": 9.268695831298828
+    },
+    "after": {
+      "tris": 3352,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.056426048278808594,
+      "fileMB": 0.20769119262695312
+    },
+    "note": "skinned, clips: idle/draw/reload/run/shoot/walk"
+  },
+  {
+    "name": "ak47_static.glb",
+    "before": {
+      "tris": 3352,
+      "draws": 1,
+      "texGpuMB": 64,
+      "texFileMB": 8.711816787719727,
+      "fileMB": 9.268695831298828
+    },
+    "after": {
+      "tris": 2480,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.056426048278808594,
+      "fileMB": 0.2006988525390625
+    },
+    "note": "0.9 m long, centre pivot, instancing"
+  },
+  {
+    "name": "cars/compact.glb",
+    "before": null,
+    "after": {
+      "tris": 7257,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.0472564697265625,
+      "fileMB": 0.2837409973144531
+    },
+    "note": "LOD1 1932 tris, 1.61 x 1.32 x 3.26 m (w x h x l)"
+  },
+  {
+    "name": "cars/coupe.glb",
+    "before": null,
+    "after": {
+      "tris": 6022,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.039402008056640625,
+      "fileMB": 0.2604408264160156
+    },
+    "note": "LOD1 1729 tris, 1.88 x 1.28 x 4.24 m (w x h x l)"
+  },
+  {
+    "name": "cars/hatchback.glb",
+    "before": null,
+    "after": {
+      "tris": 6808,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.04368114471435547,
+      "fileMB": 0.2802696228027344
+    },
+    "note": "LOD1 1755 tris, 1.74 x 1.35 x 3.96 m (w x h x l)"
+  },
+  {
+    "name": "cars/minivan.glb",
+    "before": null,
+    "after": {
+      "tris": 7450,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.03709602355957031,
+      "fileMB": 0.2797431945800781
+    },
+    "note": "LOD1 1932 tris, 1.87 x 1.76 x 4.61 m (w x h x l)"
+  },
+  {
+    "name": "cars/offroad.glb",
+    "before": null,
+    "after": {
+      "tris": 6502,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.035950660705566406,
+      "fileMB": 0.24522781372070312
+    },
+    "note": "LOD1 1625 tris, 1.96 x 1.57 x 3.94 m (w x h x l)"
+  },
+  {
+    "name": "cars/pickup.glb",
+    "before": null,
+    "after": {
+      "tris": 6918,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.03713703155517578,
+      "fileMB": 0.23941421508789062
+    },
+    "note": "LOD1 1698 tris, 2.07 x 1.70 x 5.18 m (w x h x l)"
+  },
+  {
+    "name": "cars/sedan.glb",
+    "before": null,
+    "after": {
+      "tris": 7122,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.039546966552734375,
+      "fileMB": 0.2544364929199219
+    },
+    "note": "LOD1 1749 tris, 1.94 x 1.34 x 4.36 m (w x h x l)"
+  },
+  {
+    "name": "cars/sport.glb",
+    "before": null,
+    "after": {
+      "tris": 6268,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.04178428649902344,
+      "fileMB": 0.2578849792480469
+    },
+    "note": "LOD1 1567 tris, 1.77 x 1.04 x 3.91 m (w x h x l)"
+  },
+  {
+    "name": "cars/suv.glb",
+    "before": null,
+    "after": {
+      "tris": 7951,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.035490989685058594,
+      "fileMB": 0.2625579833984375
+    },
+    "note": "LOD1 1977 tris, 2.07 x 1.73 x 4.61 m (w x h x l)"
+  },
+  {
+    "name": "cars/wagon.glb",
+    "before": null,
+    "after": {
+      "tris": 6982,
+      "draws": 1,
+      "texGpuMB": 0.3333333333333333,
+      "texFileMB": 0.039961814880371094,
+      "fileMB": 0.2892341613769531
+    },
+    "note": "LOD1 1889 tris, 1.95 x 1.38 x 4.38 m (w x h x l)"
+  },
+  {
+    "name": "cars (pack total)",
+    "before": {
+      "tris": 69312,
+      "draws": 75,
+      "texGpuMB": 208.00000000000009,
+      "texFileMB": 8.117019653320312,
+      "fileMB": 11.21707534790039
+    },
+    "after": {
+      "tris": 69280,
+      "draws": 10,
+      "texGpuMB": 3.3333333333333335,
+      "fileMB": 2.6529502868652344
+    },
+    "note": "10 types"
+  },
+  {
+    "name": "office.glb",
+    "before": {
+      "tris": 644690,
+      "draws": 57,
+      "texGpuMB": 85.5,
+      "texFileMB": 1.072831153869629,
+      "fileMB": 4.943480491638184
+    },
+    "after": {
+      "tris": 12404,
+      "draws": 3,
+      "texGpuMB": 1.3333333333333333,
+      "texFileMB": 0.11269187927246094,
+      "fileMB": 0.34789276123046875
+    },
+    "note": "9 floors @ 3.60 m, 57.0 x 39.0 x 19.8 m"
+  }
+]

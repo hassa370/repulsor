@@ -30,8 +30,8 @@ async function tryKtx2(renderer, url) {
     const type = head.headers.get('content-type') || '';
     if (!head.ok || type.includes('text/html')) return null;
     const { KTX2Loader } = await import('three/examples/jsm/loaders/KTX2Loader.js');
-    // Basis transcoder (JS + WASM) is bundled locally by Vite from three/examples.
-    const loader = new KTX2Loader().detectSupport(renderer);
+    // Basis transcoder (JS + WASM) is served from public/basis/.
+    const loader = new KTX2Loader().setTranscoderPath('basis/').detectSupport(renderer);
     const tex = await loader.loadAsync(url);
     loader.dispose();
     return tex;
