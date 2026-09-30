@@ -148,10 +148,10 @@ export class Weapons {
         h.aimD.copy(g.look);
         h.dir.copy(g.look).multiplyScalar(60).add(g.headWorld).sub(h.pos).normalize();
       }
-      const gaunt = i === 0 ? g.gauntL : g.gauntR;
-      if (gaunt && gaunt.object.parent && gaunt.getRepulsorWorldPosition) {
-        gaunt.getRepulsorWorldPosition(h.palm);
-        gaunt.getRepulsorWorldDirection(h.palmDir);
+      // Palm repulsor socket, cached by Game.updatePalmSockets() (shared with the thruster FX).
+      if (g.palmOk[i]) {
+        h.palm.copy(g.palmPos[i]);
+        h.palmDir.copy(g.palmDir[i]);
       } else {
         // no visible gauntlet (desktop / hand not tracked): the hand point
         h.palm.copy(h.pos);

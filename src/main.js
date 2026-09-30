@@ -11,6 +11,7 @@ import { GameAudio } from './audio/audio.js';
 import { buildGoonGeometries, createAtlas } from './enemy/goonModel.js';
 import { loadReferenceImage } from './core/assets.js';
 import { loadHandModels, loadNanoGauntlet } from './hud/hands.js';
+import { loadSuitSockets } from './player/suit.js';
 
 const overlay = document.getElementById('overlay');
 const vrBtn = document.getElementById('enter-vr');
@@ -67,12 +68,12 @@ async function init() {
     spriteTexture: ref.spriteTexture,
   };
 
-  const [skinnedHands, nano] = await Promise.all([loadHandModels(), loadNanoGauntlet()]);
+  const [skinnedHands, nano, suitSockets] = await Promise.all([loadHandModels(), loadNanoGauntlet(), loadSuitSockets()]);
   const handModels = { ...(skinnedHands || {}), nano };
   const input = new Input(renderer, renderer.domElement);
   const perf = new Perf(renderer);
   const audio = new GameAudio();
-  game = new Game({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels });
+  game = new Game({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels, suitSockets });
   window.__game = game; // handy in the console / for automated smoke tests
   window.__stats = city.stats;
 

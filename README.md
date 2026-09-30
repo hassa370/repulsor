@@ -43,7 +43,7 @@ All bindings live in one object, `BINDINGS` in `src/config.js`.
 | Steer / strafe | **Left thumbstick** | `W A S D` |
 | Snap turn 30° | **Right thumbstick** left/right | `Z` / `C` (mouse = free look) |
 | Fire left / right repulsor | **Left / right trigger**: tap = quick shot, hold = charged shot (fires on release) | Right / left mouse button (hold to charge) |
-| Boost ×2.5 (drains a meter) | **A** | `Shift` |
+| Boost ×2.5 (drains a meter) | **A** while squeezing a grip: the palms burn harder and both boot thrusters light, pushing along your hand thrust (half the boost from the palms, half from the boots) | `Shift` |
 | Unibeam (10 s cooldown) | **B** | `E` |
 | Comfort vignette on/off | **X** | `V` |
 | Pause menu (debug overlay lives here) | **Y** | `Tab` / `P` |

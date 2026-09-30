@@ -161,6 +161,30 @@ function deepCloneMesh(mesh) {
   return m;
 }
 
+/** Sole centres, hip (top of each leg) and eye height of the normalized suit, per side. */
+function suitSockets(doc) {
+  const a = doc.getRoot().listMeshes()[0].listPrimitives()[0].getAttribute('POSITION').getArray();
+  const mean = (test) => {
+    const out = { left: [0, 0, 0, 0], right: [0, 0, 0, 0] };
+    for (let i = 0; i < a.length; i += 3) {
+      const x = a[i], y = a[i + 1], z = a[i + 2];
+      if (!test(x, y, z)) continue;
+      const s = x > 0 ? out.left : out.right;
+      s[0] += x; s[1] += y; s[2] += z; s[3]++;
+    }
+    const r = (s) => s.slice(0, 3).map((v) => +(v / s[3]).toFixed(3));
+    return { left: r(out.left), right: r(out.right) };
+  };
+  const sole = mean((x, y) => y < 0.04);
+  const hip = mean((x, y) => y > 0.85 && y < 0.95 && Math.abs(x) > 0.02 && Math.abs(x) < 0.2);
+  let eye = 0;
+  for (let i = 1; i < a.length; i += 3) eye = Math.max(eye, a[i]);
+  return {
+    leftBoot: sole.left, rightBoot: sole.right, leftHip: hip.left, rightHip: hip.right,
+    eyeHeight: +(eye * 0.914).toFixed(3), // eyes sit ~91% of full height on this suit
+  };
+}
+
 function tris(prim) { return prim.getIndices().getCount() / 3; }
 
 /** Simplify a primitive (in place) towards `target` triangles, falling back to sloppy mode. */
@@ -240,6 +264,9 @@ const jobs = {
     keepBaseColor(doc);
     await doc.transform(weld(), join());
     normalize(doc, { height: 1.8, pivot: 'feet' });
+    // Boot/hip/eye reference points for the player rig (src/player/suit.js), in model space
+    // (the suit faces +Z, so the suit's left side is +X). Replace with foot bones once rigged.
+    doc.getRoot().listScenes()[0].setExtras({ facing: '+Z', sockets: suitSockets(doc) });
     await compressTextures(doc, 1024);
     const out = path.join(OUT, 'ironman.glb');
     const mb = await write(doc, out);

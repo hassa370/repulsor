@@ -59,7 +59,11 @@ export const FLIGHT = {
   craterSpeed: 22, // m/s downward into the ground -> crater + shockwave
   craterRadius: 16, // m, enemies inside get hit
   strafeAccel: 7, // left stick lateral / forward accel (m/s^2)
-  boostMult: 2.5,
+  boostMult: 2.5, // total thrust while boosting (x normal)
+  // Hand-flight boost split: the palms run at this much of normal thrust and the
+  // boot thrusters add the rest (boostMult - boostHandMult) along the hand thrust,
+  // so the total stays handThrust * boostMult (here 50% palms / 50% boots).
+  boostHandMult: 1.25,
   boostDrainPerSec: 0.35, // meter units (0..1) per second
   boostRefillPerSec: 0.18,
   boostRefillDelay: 0.8, // s after release before refill starts
@@ -146,6 +150,15 @@ export const ENEMY = {
   debrisLife: 4,
   waveBreak: 6,
   waves: [5, 8, 12, 16, 20, 24, 28, 32, 36, 40],
+};
+
+// Player suit rig (src/player/suit.js): body under the head + boot thruster sockets.
+export const SUIT = {
+  height: 1.8, // m, suit scale (sockets are measured on a 1.80 m suit)
+  neckBack: 0.12, // m the body sits behind the eyes
+  yawFollow: 4, // 1/s: how fast the body turns to follow the head
+  flightLegDeg: 20, // legs swing back this much while boosting
+  bootOut: 0.01, // m below the sole where boot exhaust starts
 };
 
 export const PLAYER = {

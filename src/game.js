@@ -1,6 +1,6 @@
 import { Group, Quaternion, Vector3 } from 'three';
 import { ENEMY, FLIGHT, PLAYER, WEAPONS, WORLD } from './config.js';
-import { PlayerBody, SMASH_ENTER, SMASH_EXIT, SMASH_GROUND } from './physics/player.js';
+import { PlayerBody, SMASH_ENTER, SMASH_EXIT, SMASH_GROUND, computeThrust } from './physics/player.js';
 import { Decals } from './fx/decals.js';
 import { Destruction } from './world/destruction.js';
 import { cullChunks } from './world/city.js';
@@ -15,6 +15,7 @@ import { Waves } from './enemy/waves.js';
 import { Weapons } from './weapons/weapons.js';
 import { Hud } from './hud/hud.js';
 import { Gauntlet, NanoGauntlet, makeFallbackGauntlet } from './hud/hands.js';
+import { DEFAULT_SUIT_SOCKETS, SuitRig } from './player/suit.js';
 
 const _v = new Vector3();
 const _v2 = new Vector3();
@@ -27,6 +28,8 @@ const _right = new Vector3();
 const _fwd = new Vector3();
 const _headW = new Vector3();
 const _up = new Vector3();
+const _fxA = new Vector3();
+const _fxB = new Vector3();
 const UP = new Vector3(0, 1, 0);
 
 class Flash {
@@ -38,7 +41,7 @@ class Wave3D {
 
 // Owns the player rig, fixed-step simulation and per-frame orchestration.
 export class Game {
-  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels }) {
+  constructor({ renderer, scene, camera, input, collision, city, perf, audio, goonAssets, handModels, suitSockets }) {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
@@ -89,11 +92,19 @@ export class Game {
       grip: 0, boost: false, handMode: false, handThrust: _handThrust, look: _thrustLook, stickX: 0, stickY: 0, right: _right, fwd: _fwd,
     };
     this.options = { vignette: true, bank: FLIGHT.bankEnabled, debug: false, flightMode: FLIGHT.flightMode };
-    // Hand repulsor thrusters: world thrust direction (away from the palm) + palm position.
+    // Hand repulsor thrusters: world thrust direction per hand (from the controller pose).
     this.handDir = [new Vector3(), new Vector3()];
-    this.handPos = [new Vector3(), new Vector3()];
     this.handOk = [false, false];
     this.handGrip = [0, 0];
+    // Palm repulsor sockets in world space, read once per update from each
+    // gauntlet's repulsorSocket: the one origin for blasts, charge FX and exhaust.
+    this.palmPos = [new Vector3(), new Vector3()];
+    this.palmDir = [new Vector3(), new Vector3()]; // out of the palm
+    this.palmOk = [false, false];
+    // Boost: direction the boots push along (physics-owned) and their thrust (m/s^2).
+    this.boostDir = new Vector3(0, 0, -1);
+    this.bootThrust = 0;
+    this.bootFx = 0; // smoothed 0..1 for visuals
 
     // Systems
     this.sprites = new SpriteBatch(640);
@@ -132,6 +143,8 @@ export class Game {
     this.gauntR = mkHand(1);
     this.gauntParentL = null;
     this.gauntParentR = null;
+    // Suit rig (boot thruster sockets) in head/controller space.
+    this.suit = new SuitRig(this.inner, suitSockets || DEFAULT_SUIT_SOCKETS);
 
     this.respawn();
   }
@@ -269,6 +282,26 @@ export class Game {
     if (pr !== this.gauntParentR) { if (pr) pr.add(this.gauntR.object); else this.gauntR.object.removeFromParent(); this.gauntParentR = pr; }
   }
 
+  // World pose of each palm repulsor socket (only when its gauntlet is shown).
+  updatePalmSockets() {
+    for (let h = 0; h < 2; h++) {
+      const g = h === 0 ? this.gauntL : this.gauntR;
+      const ok = !!g.object.parent && !!g.getRepulsorWorldPosition;
+      this.palmOk[h] = ok;
+      if (!ok) continue;
+      g.getRepulsorWorldPosition(this.palmPos[h]);
+      g.getRepulsorWorldDirection(this.palmDir[h]);
+    }
+  }
+
+  // Body under the head, yaw following the head; legs swing back while boosting.
+  updateSuit(dt) {
+    const cam = this.camera;
+    _v.set(0, 0, -1).applyQuaternion(cam.quaternion);
+    this.bootFx += ((this.stepInput.boost ? 1 : 0) - this.bootFx) * Math.min(1, dt * 10);
+    this.suit.update(dt, cam.position, Math.atan2(-_v.x, -_v.z), this.bootFx);
+  }
+
   // ------------------------------------------------------------------ frame
   frame(dt) {
     const input = this.input;
@@ -288,6 +321,7 @@ export class Game {
     }
     this.updateHead();
     this.attachGauntlets();
+    this.updatePalmSockets();
     this.weapons.updateAim();
     this.updateHandThrusters();
 
@@ -323,6 +357,8 @@ export class Game {
     );
     this.updateBank(dt);
     this.updateHead();
+    this.updateSuit(dt);
+    this.updatePalmSockets();
     this.weapons.updateAim();
 
     this.renderFrame(dt, alpha);
@@ -398,10 +434,25 @@ export class Game {
         _handThrust.addScaledVector(this.handDir[h], this.handGrip[h] * FLIGHT.handThrustMax);
         if (this.handGrip[h] > gmax) gmax = this.handGrip[h];
       }
-      if (wantBoost) _handThrust.multiplyScalar(FLIGHT.boostMult);
+      // Boost: the palms push harder and the boot thrusters add the rest along
+      // the combined hand thrust, so the total stays handThrust * boostMult.
+      const handMag = _handThrust.length();
+      if (handMag > 1e-3) this.boostDir.copy(_handThrust).multiplyScalar(1 / handMag);
+      if (wantBoost) {
+        this.bootThrust = handMag * (FLIGHT.boostMult - FLIGHT.boostHandMult);
+        _handThrust.multiplyScalar(FLIGHT.boostHandMult).addScaledVector(this.boostDir, this.bootThrust);
+      } else {
+        this.bootThrust = 0;
+      }
       si.grip = gmax;
     } else {
       this.handGrip[0] = this.handGrip[1] = 0;
+      // Gaze flight (desktop / gaze mode): the body applies the boost itself;
+      // the boots just show it, along the same thrust direction.
+      computeThrust(this.gripSmooth, _thrustLook, false, _v);
+      const m = _v.length();
+      if (m > 1e-3) this.boostDir.copy(_v).multiplyScalar(1 / m);
+      this.bootThrust = wantBoost ? m * (FLIGHT.boostMult - 1) : 0;
     }
     si.boost = wantBoost;
     si.stickX = alive ? input.stickX : 0;
@@ -482,7 +533,6 @@ export class Game {
       } else {
         this.handDir[h].set(e[8], e[9], e[10]).normalize(); // +Z = opposite of pointing
       }
-      this.handPos[h].set(e[12], e[13], e[14]);
     }
   }
 
@@ -581,32 +631,58 @@ export class Game {
       const charge = wh.down ? Math.min(1, wh.held) : 0;
       const firing = wh.down || wh.flash > 0 ? 1 : 0;
       const open = Math.min(1, thrust * 3 + firing);
-      const glow = thrust * 1.8 + charge * 1.5 + (wh.flash > 0 ? 3 : 0) + (this.stepInput.boost ? 0.8 : 0);
+      const glow = thrust * 1.8 + charge * 1.5 + (wh.flash > 0 ? 3 : 0) + (this.stepInput.boost ? 1.4 * this.handGrip[h] + 0.4 : 0);
       g.update(dt, open, glow);
     }
   }
 
-  // Repulsor exhaust out of each palm while its grip is squeezed.
+  // Exhaust FX. Palms: out of each palm repulsor socket while its grip is
+  // squeezed, opposite that hand's thrust. Boots: out of the boot sockets while
+  // boosting, opposite the boost direction. Physics decides every direction.
   renderThrusters() {
-    const sp = this.sprites;
+    const boosting = this.stepInput.boost;
     for (let h = 0; h < 2; h++) {
       const g = this.handGrip[h];
-      if (!this.handOk[h] || g < 0.03) continue;
-      const p = this.handPos[h], d = this.handDir[h];
-      const boost = this.stepInput.boost ? 1.6 : 1;
-      // Short cone of fire out of the palm (exhaust leaves opposite to the
-      // thrust): a hot core at the palm and flame blobs shrinking outward.
-      const L = (0.18 + 0.45 * g) * boost;
-      const t = this.time * 30 + h * 5;
-      for (let k = 0; k < 4; k++) {
-        const f = k / 3;
-        const dist = 0.05 + L * f;
-        const r = (0.05 + 0.07 * g) * (1.1 - 0.7 * f) * (0.85 + 0.15 * Math.sin(t + k * 1.7));
-        sp.pushPoint(p.x - d.x * dist, p.y - d.y * dist, p.z - d.z * dist, r,
-          1.0, 0.75 - 0.4 * f, 0.35 - 0.3 * f, (0.95 - 0.5 * f) * Math.min(1, g * 3), k === 0 ? 0.6 : 0.15);
-      }
-      if (Math.random() < g) this.particles.ember(p.x - d.x * 0.1, p.y - d.y * 0.1, p.z - d.z * 0.1,
-        -d.x * 5 + (Math.random() - 0.5), -d.y * 5 + (Math.random() - 0.5), -d.z * 5 + (Math.random() - 0.5), 1.0, 0.5, 0.1, 0.35);
+      if (!this.handOk[h] || !this.palmOk[h] || g < 0.03) continue;
+      // exhaust leaves opposite to the thrust, starting on the repulsor disc
+      _fxA.copy(this.handDir[h]).negate();
+      this.jet(this.palmPos[h], _fxA, g * (boosting ? 1.35 : 1), false, h * 5);
+    }
+    const k = this.bootFx;
+    if (k > 0.02) {
+      const g = Math.max(0.35, this.stepInput.grip);
+      _fxA.copy(this.boostDir).negate();
+      this.suit.getLeftBootWorldPosition(_fxB);
+      this.jet(_fxB, _fxA, g * k, true, 11);
+      this.suit.getRightBootWorldPosition(_fxB);
+      this.jet(_fxB, _fxA, g * k, true, 17);
+    }
+  }
+
+  // One thruster flame: tight hot core at the nozzle p, widening and cooling
+  // along the exhaust direction d. boot = the bigger, bluer-cored boot jet.
+  jet(p, d, power, boot, seed) {
+    const sp = this.sprites;
+    const n = boot ? 8 : 6;
+    const L = boot ? 0.7 + 1.5 * power : 0.2 + 0.55 * power;
+    const r0 = boot ? 0.06 + 0.05 * power : 0.03 + 0.035 * power;
+    const t = this.time * 30 + seed;
+    const fade = Math.min(1, power * 3);
+    for (let k = 0; k < n; k++) {
+      const f = k / (n - 1);
+      const dist = 0.004 + L * f;
+      const r = r0 * (1 + 2.2 * f) * (1 - 0.55 * f) * (0.85 + 0.15 * Math.sin(t + k * 1.7));
+      const cg = boot ? 0.85 - 0.5 * f : 0.8 - 0.45 * f;
+      const cb = boot ? 0.7 - 0.62 * f : 0.4 - 0.35 * f;
+      sp.pushPoint(p.x + d.x * dist, p.y + d.y * dist, p.z + d.z * dist, r,
+        1.0, cg, cb, (1.0 - 0.55 * f) * fade, k === 0 ? 0.55 : 0.2);
+    }
+    // hot nozzle glow sitting on the socket
+    sp.pushPoint(p.x, p.y, p.z, r0 * 0.9, 0.85, 0.95, 1.0, 0.85 * fade, 0.8);
+    if (Math.random() < power * (boot ? 1.5 : 1)) {
+      const s = boot ? 9 : 5;
+      this.particles.ember(p.x + d.x * 0.05, p.y + d.y * 0.05, p.z + d.z * 0.05,
+        d.x * s + (Math.random() - 0.5), d.y * s + (Math.random() - 0.5), d.z * s + (Math.random() - 0.5), 1.0, 0.5, 0.1, 0.35);
     }
   }
 
