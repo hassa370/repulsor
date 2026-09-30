@@ -232,6 +232,25 @@ Goons, bats and debris **sleep** outside the anchor bubble: no AI, physics, rend
 | Cloud sheets | 3 (2 / 1) |
 | Procedural generation | 1.0 ms / frame |
 
+### Measurements (not yet on a Quest)
+
+These numbers come from headless Chromium with SwiftShader (software GL, one 480×300 view). They are **not Quest 3 numbers**: fps there was 5–15 because of software rasterisation. Draw calls, triangles, chunk counts and memory do not depend on the hardware, so they are the numbers below. In VR, draw calls and triangles roughly double (one render per eye). Profile fps on the headset with OVR Metrics Tool (see below).
+
+| Phase | Altitude | Draw calls (1 view) | Triangles (1 view) | Chunks loaded / drawn / high | JS heap |
+|---|---|---|---|---|---|
+| Rooftop start / city flight | 45 m | 29–30 | 185k | 55 / 31 / 11 | 27–30 MB |
+| 250 m/s flight out of the city (4 origin shifts) | 54 m | 28 | 180k | 64 / 30 / 11 | 27 MB |
+| Climbing through the cloud deck | 1.5–2.6 km | 11 | 61k | 64 / 48 / 8→0 | 27 MB |
+| High atmosphere | 50 km | 12 | 64k | 64 / 46 / 0 | 27 MB |
+| Orbit | 205 km | 7–10 | 25–39k | 64 / 32–39 / 0 | 28 MB |
+| Space | 1650 km | 7–8 | 15–36k | 64 / 5 / 0 | 28 MB |
+| Re-entry → back on a city roof | 70 m | 29–30 | 170–178k | 64 / 32 / 11 | 27 MB |
+| 3 more full ground ↔ 310 km loops | – | 26–31 | 167–180k | 64 / 24–33 / 0–11 | 26.6–27.9 MB (flat) |
+
+Across 2285 origin shifts and about 2000 generated chunks, the chunk pool, node cache (≤ 260), scene object count (29) and heap all stayed flat. The local player position never exceeded ~1 km in floating mode once shifts ran per physics sub-step.
+
+World update + streaming CPU cost was measured on desktop (Node, 6000 frames: surface flight → orbit → re-entry). The median is 0.03 ms per frame and p99 is 0.47 ms. 13 frames exceeded 2 ms (worst 6.4 ms, consistent with GC/JIT). Generating one chunk takes about 0.28 ms on desktop; expect roughly 3–4× that on a Quest 3, which is why generation is capped at 1 ms/frame.
+
 **Adaptive quality** (`src/core/quality.js`) watches a 1 s rolling frame time against the current refresh budget:
 
 - It steps down after 3 s at more than 108% of budget.

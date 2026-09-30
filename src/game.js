@@ -364,13 +364,14 @@ export class Game {
       let n = 0;
       while (this.physAcc >= this.step && n < FLIGHT.maxSubSteps) {
         this.fixed(this.step);
+        // Floating origin: shift / re-anchor after every sub-step, so even at
+        // orbital speeds the local position never exceeds shiftDistance + one step.
+        if (this.world) this.world.afterPhysics(this.body.pos);
         this.physAcc -= this.step;
         n++;
       }
       if (n === FLIGHT.maxSubSteps) this.physAcc = 0;
     }
-    // Floating origin: shift / re-anchor the frame before anything is placed.
-    if (this.world) this.world.afterPhysics(this.body.pos);
     const alpha = this.physAcc / this.step;
     // Interpolated rig placement.
     this.headOffset(_v);

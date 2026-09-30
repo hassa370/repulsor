@@ -137,7 +137,7 @@ function makeCloudTexture() {
 // Polar disc: geometric rings (dense near the player, sparse far away),
 // repeated per layer. Two index orders so sheets always blend far-to-near.
 function makeDisc(layers) {
-  const rings = 36, seg = 48, r0 = 40;
+  const rings = 26, seg = 40, r0 = 60;
   const per = 1 + rings * seg;
   const pos = new Float32Array(per * layers * 3);
   const lay = new Float32Array(per * layers);
