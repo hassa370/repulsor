@@ -97,6 +97,9 @@ export const WEAPONS = {
   fullChargeTime: 1.0,
   fireCooldown: 0.12,
   life: 3.0,
+  aimRange: 400, // controller aim ray length (m): the shot target when nothing is hit
+  spawnOffset: 0.025, // blasts start this far out of the palm repulsor (m)
+  minAimDist: 0.3, // closer targets than this fall back to the aim direction
   headshotMult: 2,
   assistDeg: 7, // aim assist: snap shots to a goon within this cone...
   assistRadius: 2.5, // ...or passing within this many metres of it

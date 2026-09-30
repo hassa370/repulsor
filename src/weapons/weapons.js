@@ -11,6 +11,9 @@ const _d = new Vector3();
 const _v = new Vector3();
 const _q0 = new Vector3();
 const _q1 = new Vector3();
+const _t = new Vector3(); // shot target point
+const _p = new Vector3(); // shot origin (palm)
+const _base = new Vector3();
 
 class Blast {
   constructor() {
@@ -36,8 +39,16 @@ class Hand {
     this.cooldown = 0;
     this.value = 0;
     this.flash = 0; // muzzle flash timer
-    this.pos = new Vector3();
-    this.dir = new Vector3();
+    // Aim ray (where the player intends to shoot): controller pointing pose in
+    // VR, the screen crosshair on desktop.
+    this.pos = new Vector3(); // controller / desktop hand point
+    this.dir = new Vector3(); // controller pointing direction
+    this.aimO = new Vector3();
+    this.aimD = new Vector3();
+    // Projectile origin: the visible palm repulsor socket.
+    this.palm = new Vector3();
+    this.palmDir = new Vector3(); // out of the palm
+    this.palmOff = new Vector3(); // palm relative to the rendered body position
     this.aimDist = 50;
   }
 }
@@ -112,9 +123,15 @@ export class Weapons {
     this.unibeamCd = 0;
   }
 
-  // Hand aim poses in world space (called before physics each frame).
+  // Hand aim rays + palm repulsor poses in world space (called before physics
+  // and again before rendering each frame).
   updateAim() {
-    const input = this.game.input;
+    const g = this.game;
+    const input = g.input;
+    // Body position the rig was rendered at (the palm offset is stored relative
+    // to it so shots can spawn at the palm for any physics sub-step).
+    g.headOffset(_base);
+    _base.set(g.rig.position.x + _base.x, g.rig.position.y, g.rig.position.z + _base.z);
     for (let i = 0; i < 2; i++) {
       const h = this.hands[i];
       const obj = input.aimObject(h.name);
@@ -122,12 +139,37 @@ export class Weapons {
       h.pos.setFromMatrixPosition(obj.matrixWorld);
       const e = obj.matrixWorld.elements;
       h.dir.set(-e[8], -e[9], -e[10]).normalize();
-      if (!input.xr) {
-        // desktop: both hands converge on the screen centre
-        _v.copy(this.game.look).multiplyScalar(60).add(this.game.headWorld).sub(h.pos).normalize();
-        h.dir.copy(_v);
+      if (input.xr) {
+        h.aimO.copy(h.pos);
+        h.aimD.copy(h.dir);
+      } else {
+        // desktop: aim along the crosshair; both hands converge on it
+        h.aimO.copy(g.headWorld);
+        h.aimD.copy(g.look);
+        h.dir.copy(g.look).multiplyScalar(60).add(g.headWorld).sub(h.pos).normalize();
       }
+      const gaunt = i === 0 ? g.gauntL : g.gauntR;
+      if (gaunt && gaunt.object.parent && gaunt.getRepulsorWorldPosition) {
+        gaunt.getRepulsorWorldPosition(h.palm);
+        gaunt.getRepulsorWorldDirection(h.palmDir);
+      } else {
+        // no visible gauntlet (desktop / hand not tracked): the hand point
+        h.palm.copy(h.pos);
+        h.palmDir.copy(h.dir);
+      }
+      h.palmOff.copy(h.palm).sub(_base);
     }
+  }
+
+  // Where this hand's shot should land: the aim ray against the world, then
+  // aim assist (with lead). Writes the point to out; returns the assisted goon.
+  aimTarget(h, speed, out) {
+    const c = this.game.collision;
+    const o = h.aimO, d = h.aimD;
+    const R = WEAPONS.aimRange;
+    const dist = Math.min(c.raycast(o.x, o.y, o.z, d.x, d.y, d.z, R, true), R);
+    out.copy(d).multiplyScalar(dist).add(o);
+    return this.assistTarget(o, d, speed, out);
   }
 
   fire(h, charged, power) {
@@ -140,26 +182,34 @@ export class Weapons {
     b.power = power;
     b.radius = charged ? WEAPONS.chargedRadius * (0.6 + 0.4 * power) : WEAPONS.quickRadius;
     const sp = charged ? WEAPONS.chargedSpeed : WEAPONS.quickSpeed;
-    b.pos.copy(h.pos).addScaledVector(h.dir, 0.15);
+    // controller ray -> raw target -> aim assist -> final target
+    b.target = this.aimTarget(h, sp, _t);
+    // Origin: the palm repulsor where it is drawn at the start of this physics
+    // step (weapons run after the body step, so body.prevPos is that position).
+    _p.copy(g.body.prevPos).add(h.palmOff);
+    // Direction: straight from the palm to the target.
+    _d.copy(_t).sub(_p);
+    const len = _d.length();
+    if (len > WEAPONS.minAimDist) _d.multiplyScalar(1 / len);
+    else _d.copy(h.aimD);
+    b.pos.copy(_p).addScaledVector(_d, WEAPONS.spawnOffset);
     b.prevPos.copy(b.pos);
-    // Aim assist: bend the shot toward a goon near the aim ray (with lead).
-    b.target = this.assistTarget(h.pos, h.dir, sp, _d);
-    if (!b.target) _d.copy(h.dir);
-    // inherit player velocity so shots don't lag when flying fast
+    // No inherited player velocity: the shot flies exactly along palm -> target.
     b.speed = sp;
-    b.vel.copy(_d).multiplyScalar(sp).add(g.body.vel);
+    b.vel.copy(_d).multiplyScalar(sp);
     b.life = WEAPONS.life;
     b.age = 0;
     h.flash = charged ? 0.14 : 0.07;
     h.cooldown = WEAPONS.fireCooldown;
     const recoil = charged ? FLIGHT.recoilCharged * power : FLIGHT.recoilQuick;
-    g.body.impulse(-h.dir.x * recoil, -h.dir.y * recoil, -h.dir.z * recoil);
+    g.body.impulse(-_d.x * recoil, -_d.y * recoil, -_d.z * recoil);
     g.input.haptic(h.name, charged ? 0.9 : 0.4, charged ? 90 : 35);
-    g.audio.play(charged ? 'charged' : 'blast', h.pos.x, h.pos.y, h.pos.z, 1);
+    g.audio.play(charged ? 'charged' : 'blast', _p.x, _p.y, _p.z, 1);
   }
 
-  // Best goon for aim assist from origin o along dir; writes the aim direction.
-  assistTarget(o, dir, speed, outDir) {
+  // Best goon for aim assist near the ray (o, dir). If found and outPoint is
+  // given, writes the lead-corrected aim point on the goon to outPoint.
+  assistTarget(o, dir, speed, outPoint) {
     const list = this.game.enemies.list;
     const cosA = Math.cos(WEAPONS.assistDeg * Math.PI / 180);
     let best = null, bestScore = -Infinity;
@@ -177,10 +227,10 @@ export class Weapons {
       const score = c - d * 0.0002;
       if (score > bestScore) { bestScore = score; best = e; }
     }
-    if (best && outDir) {
+    if (best && outPoint) {
       const cx = best.pos.x - o.x, cy = best.pos.y + 1.1 * best.scale - o.y, cz = best.pos.z - o.z;
       const T = Math.sqrt(cx * cx + cy * cy + cz * cz) / speed;
-      outDir.set(cx + best.vel.x * T, cy + best.vel.y * T * 0.5, cz + best.vel.z * T).normalize();
+      outPoint.set(best.pos.x + best.vel.x * T, best.pos.y + 1.1 * best.scale + best.vel.y * T * 0.5, best.pos.z + best.vel.z * T);
     }
     return best;
   }
@@ -398,8 +448,8 @@ export class Weapons {
       if (!b.active) continue;
       _o.lerpVectors(b.prevPos, b.pos, alpha);
       // Fireball: white-yellow core in flickering orange flame, with a tail of
-      // fire blobs fading to red behind it (relative to the shooter's motion).
-      _v.copy(b.vel).sub(g.body.vel);
+      // fire blobs fading to red behind it, along its own flight path.
+      _v.copy(b.vel);
       const sp2 = _v.length() || 1;
       const R = b.charged ? b.radius * 1.4 : 0.42;
       const t = g.time * 25 + i * 3.7;
@@ -429,13 +479,15 @@ export class Weapons {
       const h = this.hands[i];
       if (h.flash > 0) {
         const k = h.flash / 0.1;
-        sp.pushPoint(h.pos.x + h.dir.x * 0.08, h.pos.y + h.dir.y * 0.08, h.pos.z + h.dir.z * 0.08, 0.14 + 0.22 * k, 1.0, 0.55, 0.12, Math.min(1, k), 0.5);
+        const f = 0.03 + 0.05 * k; // flash bloom just out of the palm repulsor
+        sp.pushPoint(h.palm.x + h.palmDir.x * f, h.palm.y + h.palmDir.y * f, h.palm.z + h.palmDir.z * f, 0.14 + 0.22 * k, 1.0, 0.55, 0.12, Math.min(1, k), 0.5);
       }
       if (h.down && h.held > 0.05) {
         const c = Math.min(1, h.held / WEAPONS.fullChargeTime);
         const pulse = 0.85 + 0.15 * Math.sin(g.time * 30);
         // fireball growing in the palm
-        const cx = h.pos.x + h.dir.x * 0.08, cy = h.pos.y + h.dir.y * 0.08, cz = h.pos.z + h.dir.z * 0.08;
+        const r0 = 0.02 + 0.05 * c; // sits on the repulsor disc, bulging out as it grows
+        const cx = h.palm.x + h.palmDir.x * r0, cy = h.palm.y + h.palmDir.y * r0, cz = h.palm.z + h.palmDir.z * r0;
         sp.pushPoint(cx, cy, cz, (0.05 + 0.16 * c) * pulse, 1.0, 0.35, 0.05, 0.7, 0);
         sp.pushPoint(cx, cy, cz, (0.03 + 0.08 * c) * pulse, 1.0, 0.8, 0.4, 1, 0.7);
         if (Math.random() < 0.3 + c) g.particles.ember(cx, cy, cz, (Math.random() - 0.5) * 0.6, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 0.6, 1.0, 0.45, 0.08, 0.4);
@@ -491,7 +543,7 @@ export class Weapons {
         const h = this.hands[i];
         if (h.value < 0.02) continue;
         const c = g.collision;
-        const dist = Math.min(c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, 400), 400);
+        const dist = Math.min(c.raycast(h.pos.x, h.pos.y, h.pos.z, h.dir.x, h.dir.y, h.dir.z, WEAPONS.aimRange, true), WEAPONS.aimRange);
         const lock = this.assistTarget(h.pos, h.dir, WEAPONS.quickSpeed, null);
         const k = 0.35 + 0.65 * Math.min(1, h.value / 0.55);
         _v.copy(h.dir).multiplyScalar(Math.min(dist, 150)).add(h.pos);

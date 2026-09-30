@@ -1,6 +1,6 @@
 import {
   BufferAttribute, BufferGeometry, CircleGeometry, Color, CylinderGeometry, Group, Matrix4, Mesh, MeshBasicMaterial,
-  MeshStandardMaterial, Quaternion, TorusGeometry, Vector3,
+  MeshStandardMaterial, Object3D, Quaternion, TorusGeometry, Vector3,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -34,6 +34,33 @@ function posed(inner) {
   g.rotation.x = HAND_POSE.tilt;
   g.position.set(HAND_POSE.x, HAND_POSE.y, HAND_POSE.z);
   return g;
+}
+
+// Repulsor socket: an empty transform at the centre of the visible palm disc,
+// just outside its surface, with local -Z pointing out of the palm. It rides
+// the rendered gauntlet, so everything that should come out of the repulsor
+// (blasts, charge orb, muzzle flash, thruster FX) can share one origin.
+export const REPULSOR_SOCKET_OUT = 0.001; // metres in front of the glowing disc
+
+function addRepulsorSocket(parent, x, y, z, rotY = 0) {
+  const s = new Object3D();
+  s.name = 'repulsorSocket';
+  s.position.set(x, y, z);
+  s.rotation.y = rotY;
+  parent.add(s);
+  return s;
+}
+
+function socketWorldPosition(socket, out) {
+  socket.updateWorldMatrix(true, false);
+  return out.setFromMatrixPosition(socket.matrixWorld);
+}
+
+// Out of the palm = socket -Z (unaffected by the left hand's X mirror).
+function socketWorldDirection(socket, out) {
+  socket.updateWorldMatrix(true, false);
+  const e = socket.matrixWorld.elements;
+  return out.set(-e[8], -e[9], -e[10]).normalize();
 }
 
 const RED = new Color(0x9e1414), GOLD = new Color(0xe0a838), GUN = new Color(0x2e2e34), SEAM = new Color(0x120808);
@@ -111,6 +138,9 @@ export class Gauntlet {
     disc.rotation.y = palmSign > 0 ? Math.PI / 2 : -Math.PI / 2;
     disc.position.copy(ring.position).x += palmSign * 0.001;
     this.object.add(ring, disc);
+    // Socket just outside the disc; rotate so its -Z is the palm normal (palmSign * X).
+    this.repulsorSocket = addRepulsorSocket(this.object,
+      disc.position.x + palmSign * REPULSOR_SOCKET_OUT, disc.position.y, disc.position.z, -palmSign * Math.PI / 2);
 
     // Wrist cuff + forearm (grip space, extending toward +Z), vertex-coloured.
     this.object.add(this.buildCuff());
@@ -138,6 +168,9 @@ export class Gauntlet {
       : new Matrix4().set(0, 1, 0, 0, 0, 0, -1, 0, -1, 0, 0, 0, 0, 0, 0, 1));
     this.object.add(posed(inner));
   }
+
+  getRepulsorWorldPosition(out) { return socketWorldPosition(this.repulsorSocket, out); }
+  getRepulsorWorldDirection(out) { return socketWorldDirection(this.repulsorSocket, out); }
 
   // Armour paint from skin weights: which joint dominates each vertex.
   paint(mesh, bones, backDir) {
@@ -226,7 +259,14 @@ export function makeFallbackGauntlet() {
   const m = new Mesh(new CylinderGeometry(0.035, 0.04, 0.16, 12).rotateX(Math.PI / 2).translate(0, 0, 0.05),
     new MeshStandardMaterial({ color: RED, metalness: 0.85, roughness: 0.3 }));
   g.add(m);
-  return { object: g, update() {} };
+  const socket = addRepulsorSocket(g, 0, 0, -0.03 - REPULSOR_SOCKET_OUT);
+  return {
+    object: g,
+    repulsorSocket: socket,
+    update() {},
+    getRepulsorWorldPosition: (out) => socketWorldPosition(socket, out),
+    getRepulsorWorldDirection: (out) => socketWorldDirection(socket, out),
+  };
 }
 
 
@@ -357,10 +397,15 @@ export class NanoGauntlet {
     disc.rotation.y = Math.PI;
     disc.position.set(0, 0.004, -0.005);
     palmSpace.add(ring, disc);
+    // Palm space: the disc faces -Z, so the socket needs no rotation.
+    this.repulsorSocket = addRepulsorSocket(palmSpace, disc.position.x, disc.position.y, disc.position.z - REPULSOR_SOCKET_OUT);
     this.object.add(posed(palmSpace));
     if (side < 0) this.object.scale.x = -1; // left hand = mirrored right
     this.t = 0;
   }
+
+  getRepulsorWorldPosition(out) { return socketWorldPosition(this.repulsorSocket, out); }
+  getRepulsorWorldDirection(out) { return socketWorldDirection(this.repulsorSocket, out); }
 
   update(dt, open, glow) {
     this.t += dt;
